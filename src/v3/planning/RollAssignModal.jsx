@@ -24,6 +24,16 @@ export default function RollAssignModal({ target, canAssign, onClose, onDone }) 
     const pickedQty = picked.reduce((s, r) => s + r.qty, 0);
     const covered = d ? pickedQty + 1e-9 >= d.open : false;   // the roll that crossed the need was the last one
     const toggle = (r) => setPick(p => (p.includes(r.id) ? p.filter(x => x !== r.id) : covered ? p : [...p, r.id]));
+    // Select all (8 Nov 2026): the same rule as ticking one by one — rolls in list order until the need is covered
+    // (the roll that crosses it is the last), or every free roll when together they are still short. Again: clear.
+    const allOn = !!d && pick.length > 0 && (covered || pick.length === d.free.length);
+    const selectAll = () => setPick(() => {
+        if (allOn) return [];
+        const out = []; let sum = 0;
+        for (const r of d.free) { if (sum + 1e-9 >= d.open) break; out.push(r.id); sum += r.qty; }
+        return out;
+    });
+    const freeQty = d ? d.free.reduce((s, r) => s + r.qty, 0) : 0;
     const assign = async () => {
         setBusy(true); setError('');
         try { await planningApi.allocateRolls({ order_id: target.orderId, item_id: target.itemId, roll_ids: pick }); onDone(`${pick.length} roll(s) assigned to ${target.orderNo}.`); }
@@ -48,10 +58,13 @@ export default function RollAssignModal({ target, canAssign, onClose, onDone }) 
                     </div>
                     {canAssign && d.open > 0 && (
                         <div>
-                            <p className="text-xs font-black uppercase tracking-wider text-slate-500 mb-1.5">Free rolls — tick whole rolls ({picked.length} ticked · {fmt(pickedQty)} {u}{covered ? ' · covered — no more' : ''})</p>
+                            <div className="flex flex-wrap items-center gap-3 mb-1.5">
+                                <p className="text-xs font-black uppercase tracking-wider text-slate-500">Free rolls — tick whole rolls ({picked.length} ticked · {fmt(pickedQty)} {u}{covered ? ' · covered — no more' : ''})</p>
+                                {d.free.length > 0 && <button type="button" onClick={selectAll} className="text-xs font-bold text-indigo-700 hover:underline">{allOn ? 'Clear' : freeQty + 1e-9 >= d.open ? 'Select all (up to the need)' : `Select all ${d.free.length}`}</button>}
+                            </div>
                             {d.free.length === 0 ? <p className="text-sm text-slate-500">No free rolls of this fabric in stock.</p> : (
                                 <div className="max-h-[38vh] overflow-y-auto border border-slate-200 rounded-xl">
-                                    <table className="w-full text-sm"><thead className="bg-slate-50 text-xs text-slate-500 text-left sticky top-0"><tr><th className="px-3 py-2 w-10" /><th className="px-3 py-2">Roll</th><th className="px-3 py-2">Dye lot</th><th className="px-3 py-2 text-right">Length</th><th className="px-3 py-2">Width</th><th className="px-3 py-2">Location</th></tr></thead>
+                                    <table className="w-full text-sm"><thead className="bg-slate-50 text-xs text-slate-500 text-left sticky top-0"><tr><th className="px-3 py-2 w-10"><input type="checkbox" className="w-4 h-4" checked={allOn} onChange={selectAll} aria-label={freeQty + 1e-9 >= d.open ? 'Select rolls up to the need' : 'Select all free rolls'} title={allOn ? 'Clear the ticks' : freeQty + 1e-9 >= d.open ? 'Tick rolls in list order until the need is covered' : 'Tick all free rolls (still short of the need)'} /></th><th className="px-3 py-2">Roll</th><th className="px-3 py-2">Dye lot</th><th className="px-3 py-2 text-right">Length</th><th className="px-3 py-2">Width</th><th className="px-3 py-2">Location</th></tr></thead>
                                         <tbody>{d.free.map(r => {
                                             const on = pick.includes(r.id);
                                             const off = !on && covered;
@@ -62,7 +75,11 @@ export default function RollAssignModal({ target, canAssign, onClose, onDone }) 
                                                     <td className="px-3 py-2 text-right tabular-nums">{fmt(r.qty)} {u}</td><td className="px-3 py-2">{r.width ? `${r.width} ${r.width_unit || ''}` : '—'}</td><td className="px-3 py-2">{r.location || '—'}</td>
                                                 </tr>
                                             );
-                                        })}</tbody></table>
+                                        })}</tbody>
+                                        <tfoot className="bg-slate-50 text-xs font-bold text-slate-600 sticky bottom-0"><tr className="border-t-2 border-slate-200">
+                                            <td className="px-3 py-2" /><td className="px-3 py-2" colSpan={2}>{d.free.length} free roll{d.free.length === 1 ? '' : 's'} · {picked.length} ticked</td>
+                                            <td className="px-3 py-2 text-right tabular-nums">{fmt(freeQty)} {u}<span className="block font-semibold text-indigo-700">{fmt(pickedQty)} {u} ticked</span></td><td className="px-3 py-2" colSpan={2} />
+                                        </tr></tfoot></table>
                                 </div>
                             )}
                             <div className="flex justify-end mt-2"><PrimaryButton onClick={assign} busy={busy} disabled={busy || !pick.length}>Assign {pick.length || ''} roll{pick.length === 1 ? '' : 's'}</PrimaryButton></div>

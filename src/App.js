@@ -252,6 +252,7 @@ const V3PurchaseOrdersPage = lazyPage(() => import('./v3/purchasing/PurchaseOrde
 const V3NewPurchaseOrderPage = lazyPage(() => import('./v3/purchasing/NewPurchaseOrderPage'));
 const V3ToOrderPage = lazyPage(() => import('./v3/purchasing/ToOrderPage'));
 const V3PurchaseOrderPage = lazyPage(() => import('./v3/purchasing/PurchaseOrderPage'));
+const V3PoTrailPage = lazyPage(() => import('./v3/purchasing/PoTrailPage'));
 const V3ReceiveGoodsPage = lazyPage(() => import('./v3/purchasing/ReceiveGoodsPage'));
 const V3DirectPurchasePage = lazyPage(() => import('./v3/purchasing/DirectPurchasePage'));
 const V3GrnListPage = lazyPage(() => import('./v3/purchasing/GrnListPage'));
@@ -375,6 +376,7 @@ const appRoutes = (
           <Route path="purchasing/orders" element={<V3PurchaseOrdersPage />} />
           <Route path="purchasing/orders/new" element={<V3NewPurchaseOrderPage />} />
           <Route path="purchasing/orders/:id" element={<V3PurchaseOrderPage />} />
+          <Route path="purchasing/orders/:id/trail" element={<V3PoTrailPage />} />
           <Route path="purchasing/receive" element={<V3ReceiveGoodsPage />} />
           <Route path="purchasing/direct" element={<V3DirectPurchasePage />} />
           <Route path="purchasing/receive/:poId" element={<V3ReceiveGoodsPage />} />

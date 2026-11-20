@@ -1,48 +1,35 @@
-// Cut order plan for an order line (8 Nov 2026, owner: "we must build intelligent module which calculate and suggest cut
-// plan. it has to be dynamic user can change or control rules of cut plan"). Backend: controllers/v3/cutPlansController.js,
-// engine controllers/v3/cutPlanner.js.
-//   Rules: the plan's cut allowance (its own %) and lay rules (end loss per ply, lay height, garments per marker, marker
-//          length, extra pieces per size, colour / shade / width mixing), defaulting to the factory's; managers can save
-//          them as the factory's defaults, the factory admin decides whether batches must come from a plan.
-//   Target: per colour × size, the order + the plan's allowance against what is cut / on batches and planned on lays.
-//   Fabric: what is free at cutting per colour against what is still to plan.
-//   Lays: suggested or typed — ratio, marker length (estimated from this style's past batches or the BOM), whole rolls
-//          of one shade / width group with planned plies, the end bit each leaves; every change is checked against the
-//          rules (warnings only). "Create batch" turns a lay into a cut batch.
+// Cut plan for an order line (rebuilt 8 Nov 2026, owner: "planner manually define marker ratio and length is auto
+// calculated, then planner select rolls for marker it calculate endbits and lays, and Target table is updated with
+// available fabric — this planner is visualisation before execution"). Backend: controllers/v3/cutPlansController.js,
+// arithmetic controllers/v3/cutPlanner.js.
+//   Target: per colour × size the order + the plan's allowance against cut / on batches + planned, with the fabric still
+//           free per colour and about how many garments it gives.
+//   Lays:   one marker each — the planner's size ratio; its length = Σ ratio × the BOM's fabric per garment (all-in, so a
+//           ply is the marker). The planner ticks rolls / end bits / the ends earlier lays leave; each shows the plies it
+//           gives, the metres used and the end bit left. "Create batch" turns a lay into a cut batch.
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Wand2, Plus, Save, Scissors, Trash2, Pencil, X, AlertTriangle, Layers, ChevronDown, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Plus, Save, Scissors, Trash2, Pencil, X, AlertTriangle, Layers, ChevronDown, ChevronRight, RotateCcw } from 'lucide-react';
 import { cuttingApi } from '../api/cuttingApi';
 import { apiError } from '../api/mastersApi';
-import { PageHeader, Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, Loading } from '../components/ui';
+import { PageHeader, inputCls, PrimaryButton, SecondaryButton, ErrorBox, Loading } from '../components/ui';
 import { fmtDate } from '../salesOrders/SalesOrderStatusBadge';
 import { CUT_STATUS, LEN_PER_IN, fmt } from './cutShared';
 
-const RULES = [
-    ['end_loss_cm', 'End loss per ply (cm)', 'Both ends of a ply together.'],
-    ['max_plies', 'Max plies per lay', 'Lay height the knife cuts cleanly.'],
-    ['min_plies', 'Small lay below (plies)', 'Smaller lays only for what the order itself still needs.'],
-    ['max_garments', 'Max garments per marker', 'Ratio total.'],
-    ['min_garments', 'Min garments per marker', 'Fuller markers nest better; a small rest may go below.'],
-    ['max_marker_in', 'Max marker length (in)', 'Table length less margins.'],
-    ['over_pcs', 'Extra pieces per size', 'Above the target, to save a lay.'],
-    ['width_tol_cm', 'Width group within (cm)', 'Rolls this close in width are one group.'],
-    ['max_lays', 'Max lays', 'Each lay is a batch. 0 = no limit.'],
-    ['max_markers', 'Max markers', 'Different ratios; one marker can be laid again. 0 = no limit.'],
-];
-const SWITCHES = [
-    ['mix_colours', 'Stack colours with the same ratio in one lay'],
-    ['mix_shade', 'Allow different shade groups in one lay'],
-    ['mix_width', 'Allow different width groups in one lay'],
-];
-const CM_PER_IN = 2.54;
-const plyIn = (marker, rules) => (Number(marker) > 0 ? Number(marker) + rules.end_loss_cm / CM_PER_IN : null);
-const maxPlies = (roll, marker, rules) => {
-    const p = plyIn(marker, rules);
-    return p && LEN_PER_IN[roll.uom] ? Math.floor(roll.length / (p * LEN_PER_IN[roll.uom]) + 1e-9) : null;
-};
 const qtyText = (o) => Object.entries(o || {}).filter(([, v]) => v).map(([u, v]) => `${fmt(v, 2)} ${u}`).join(' + ') || '—';
-const widthText = (r) => (r.measured_width ? `${r.measured_width} ${r.measured_width_unit}` : r.store_width ? `${r.store_width} ${r.store_width_unit || ''}`.trim() : '—');
+const addQty = (list, pick) => list.reduce((a, x) => { const v = pick(x); if (v != null && x.uom) a[x.uom] = (a[x.uom] || 0) + v; return a; }, {});
+const inText = (inches) => (inches ? `${fmt(inches, 2)} in (${fmt(inches * LEN_PER_IN.m, 2)} m)` : '—');
+const markerOf = (ratio, colourIds, d) => {
+    const ids = colourIds.length ? colourIds : d.colours.slice(0, 1).map(c => c.id);
+    const lens = ids.map(cid => {
+        const per = d.length_per_size[cid] || {};
+        let v = 0;
+        for (const [sid, n] of Object.entries(ratio)) { if (!Number(n)) continue; if (!per[sid]) return null; v += Number(n) * per[sid]; }
+        return v ? Math.round(v * 100) / 100 : null;
+    }).filter(Boolean);
+    return lens.length ? Math.max(...lens) : null;
+};
+const pliesOf = (piece, marker) => (marker && LEN_PER_IN[piece.uom] ? Math.floor(piece.length / (marker * LEN_PER_IN[piece.uom]) + 1e-9) : null);
 
 export default function CutPlanPage() {
     const { lineId } = useParams();
@@ -51,12 +38,10 @@ export default function CutPlanPage() {
     const [error, setError] = useState('');
     const [msg, setMsg] = useState('');
     const [busy, setBusy] = useState(false);
-    const [rules, setRules] = useState(null);
     const [allowance, setAllowance] = useState('');
     const [adding, setAdding] = useState(false);
     const [showHistory, setShowHistory] = useState(false);
-    const [mandatory, setMandatory] = useState(false);
-    const take = (data) => { setD(data); setRules(data.rules); setAllowance(String(data.allowance_pct)); setMandatory(Boolean(data.defaults?.plan_mandatory)); };
+    const take = (data) => { setD(data); setAllowance(String(data.allowance_pct)); };
     useEffect(() => { cuttingApi.plan(lineId).then(res => take(res.data)).catch(err => setError(apiError(err, 'Failed to load the cut plan.'))); }, [lineId]);
     const run = async (fn, done) => {
         setBusy(true); setError(''); setMsg('');
@@ -68,165 +53,48 @@ export default function CutPlanPage() {
     const colourName = useMemo(() => new Map((d?.colours || []).map(c => [c.id, c.name])), [d]);
     if (!d) return <div>{error ? <ErrorBox text={error} /> : <Loading />}</div>;
     const can = d.can.manage;
-    const rulesChanged = rules && (JSON.stringify(rules) !== JSON.stringify(d.rules) || Number(allowance) !== d.allowance_pct);
-    const openLays = d.lays.filter(l => !l.batch);
     const layWarnings = (no) => d.warnings.filter(w => w.startsWith(`Lay ${no}:`));
     const general = d.warnings.filter(w => !/^Lay \d+:/.test(w));
-    const saveRules = (then) => run(() => cuttingApi.savePlan(lineId, { allowance_pct: Number(allowance), rules }), then);
-    const suggest = () => {
-        if (openLays.length && !window.confirm(`Suggest again? The ${openLays.length} lay(s) not yet batches are replaced; lays already batches stay.`)) return;
-        run(async () => {
-            if (rulesChanged) await cuttingApi.savePlan(lineId, { allowance_pct: Number(allowance), rules });
-            return cuttingApi.suggestPlan(lineId);
-        }, (data) => setMsg(data?.suggestion_warnings?.length ? '' : 'Plan suggested — check each lay, change what the floor knows better, then create the batches.'));
-    };
-    // Coverage matrix: covered + planned against the target.
-    const cell = (cid, sid) => d.cells.find(x => x.colour_id === cid && x.size_id === sid);
-    const colourIds = [...new Set(d.cells.map(x => x.colour_id))];
-    const sizeIds = d.sizes.filter(s => d.cells.some(x => x.size_id === s.id)).map(s => s.id);
-    const total = (list) => list.reduce((a, x) => ({ target: a.target + x.target, covered: a.covered + x.covered, planned: a.planned + x.planned, ordered: a.ordered + x.ordered }), { target: 0, covered: 0, planned: 0, ordered: 0 });
-    const tone = (t) => (!t.target && !t.covered && !t.planned ? '' : t.covered + t.planned < t.ordered ? 'bg-rose-50 text-rose-800' : t.covered + t.planned - t.target > (d.rules.over_pcs || 0) ? 'bg-amber-50 text-amber-800' : 'bg-emerald-50 text-emerald-800');
-    const Cell = ({ t, strong }) => (
-        <td className={`px-2 py-1.5 text-center tabular-nums ${tone(t)} ${strong ? 'font-bold' : ''}`}>
-            <span className="font-bold">{t.covered + t.planned}</span><span className="text-slate-500"> / {t.target}</span>
-            {t.planned > 0 && <span className="block text-[11px] text-indigo-700">+{t.planned} planned</span>}
-        </td>
-    );
+    const open = d.lays.filter(l => !l.batch);
     return (
         <div>
             <Link to="/v3/cutting" className="inline-flex items-center gap-1 text-sm font-semibold text-slate-500 hover:text-indigo-600 mb-3"><ArrowLeft size={15} /> Cutting</Link>
             <PageHeader title={`Cut plan — ${d.line.order_no} line ${d.line.line_no}`} subtitle={`${d.line.customer_name} · ${d.line.style_code} ${d.line.style_name} · ships ${fmtDate(d.line.ship_date)}`}
                 actions={<div className="flex flex-wrap gap-2">
                     <Link to={`/v3/cutting/orders/${d.line.order_id}/roll-groups`} className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold border border-slate-300 rounded-lg hover:border-indigo-400"><Layers size={15} /> Group rolls</Link>
-                    {can && !d.defaults.plan_mandatory && <Link to={`/v3/cutting/lines/${lineId}/new`} className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold border border-slate-300 rounded-lg hover:border-indigo-400">Batch without plan</Link>}
+                    {can && <Link to={`/v3/cutting/lines/${lineId}/new`} className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold border border-slate-300 rounded-lg hover:border-indigo-400">Batch without plan</Link>}
                 </div>} />
             <div className={`mb-3 text-sm rounded-lg px-3 py-2 border ${d.cutting_gate.allowed ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-rose-50 border-rose-200 text-rose-900'}`}><b>Cutting gate:</b> {d.cutting_gate.allowed ? (d.cutting_gate.ready ? 'open — all materials covered.' : `open by override — ${d.cutting_gate.reason}`) : `closed — ${d.cutting_gate.reason}`}</div>
             {d.notes.map(n => <p key={n} className="mb-3 text-sm rounded-lg bg-amber-50 border border-amber-200 text-amber-900 px-3 py-2">{n}</p>)}
             <ErrorBox text={error} />
             {msg && <p className="mb-3 text-sm rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-900 px-3 py-2">{msg}</p>}
 
-            {/* Rules */}
-            <section className="bg-white border border-slate-200 rounded-xl p-4 mb-4">
-                <div className="flex flex-wrap items-baseline gap-2 mb-3">
-                    <h2 className="font-bold text-slate-800">Rules for this plan</h2>
-                    <span className="text-xs text-slate-500">{d.exists ? 'Changed rules apply to the next suggestion and to the checks below.' : 'Factory defaults — change any for this order line.'}</span>
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    <Field label="Cut allowance %" hint={`Order: ${d.order_allowance_pct}%. This plan's own target.`}>
-                        <input className={inputCls} type="number" min="0" max="50" step="0.5" value={allowance} disabled={!can} onChange={e => setAllowance(e.target.value)} />
-                    </Field>
-                    {RULES.map(([k, label, hint]) => (
-                        <Field key={k} label={label} hint={hint}>
-                            <input className={`${inputCls} ${rules[k] !== d.defaults.rules[k] ? 'border-indigo-400 bg-indigo-50/40' : ''}`} type="number" min="0" step="any" value={rules[k]} disabled={!can}
-                                onChange={e => setRules({ ...rules, [k]: e.target.value === '' ? '' : Number(e.target.value) })} />
-                        </Field>
-                    ))}
-                </div>
-                <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2">
-                    {SWITCHES.map(([k, label]) => (
-                        <label key={k} className={`flex items-center gap-2 text-sm ${rules[k] !== d.defaults.rules[k] ? 'font-semibold text-indigo-800' : 'text-slate-700'}`}>
-                            <input type="checkbox" checked={Boolean(rules[k])} disabled={!can} onChange={e => setRules({ ...rules, [k]: e.target.checked })} /> {label}
-                        </label>
-                    ))}
-                </div>
-                {can && (
-                    <div className="mt-4 flex flex-wrap items-center gap-2">
-                        <PrimaryButton onClick={() => saveRules(() => setMsg('Rules saved.'))} busy={busy} disabled={busy || !rulesChanged}><Save size={15} /> Save rules</PrimaryButton>
-                        <SecondaryButton disabled={busy} onClick={() => setRules({ ...d.defaults.rules })}>Use factory defaults</SecondaryButton>
-                        <SecondaryButton disabled={busy} onClick={() => { if (window.confirm('Make these rules the factory defaults for every new cut plan?')) run(() => cuttingApi.savePlanSettings({ rules }), () => cuttingApi.plan(lineId).then(res => { take(res.data); setMsg('Factory defaults saved.'); })); }}>Save as factory defaults</SecondaryButton>
-                        {d.can.settings && (
-                            <label className="ml-auto flex items-center gap-2 text-sm text-slate-700">
-                                <input type="checkbox" checked={mandatory} disabled={busy} onChange={e => { const v = e.target.checked; if (window.confirm(v ? 'From now on batches can only be created from a cut plan lay. Continue?' : 'Allow batches without a cut plan again?')) run(() => cuttingApi.savePlanSettings({ plan_mandatory: v }), () => { setMandatory(v); cuttingApi.plan(lineId).then(res => take(res.data)); }); }} />
-                                Batches only from a cut plan (factory)
-                            </label>
-                        )}
-                    </div>
-                )}
-            </section>
+            <TargetTable d={d} can={can} busy={busy} allowance={allowance} setAllowance={setAllowance} colourName={colourName}
+                onSaveAllowance={() => run(() => cuttingApi.savePlan(lineId, { allowance_pct: Number(allowance) }), () => setMsg('Allowance saved — the target is updated.'))} />
 
-            {/* Target */}
-            <section className="bg-white border border-slate-200 rounded-xl mb-4 overflow-x-auto">
-                <div className="px-4 pt-3 pb-2 flex flex-wrap items-baseline gap-2">
-                    <h2 className="font-bold text-slate-800">Target</h2>
-                    <span className="text-xs text-slate-500">Cut or on batches + planned / order + {d.allowance_pct}%. Green covered · amber above the target · red below the order.</span>
-                </div>
-                <table className="w-full text-sm min-w-[640px]">
-                    <thead className="bg-slate-50 text-xs font-bold text-slate-500 uppercase tracking-wider"><tr><th className="px-3 py-2 text-left">Colour</th>{sizeIds.map(sid => <th key={sid} className="px-2 py-2 text-center">{sizeName.get(sid)}</th>)}<th className="px-2 py-2 text-center">Total</th></tr></thead>
-                    <tbody>
-                        {colourIds.map(cid => {
-                            const row = d.cells.filter(x => x.colour_id === cid);
-                            return (
-                                <tr key={cid} className="border-t border-slate-100">
-                                    <td className="px-3 py-1.5 font-semibold whitespace-nowrap">{colourName.get(cid)}<span className="block text-[11px] font-normal text-slate-500">ordered {total(row).ordered}</span></td>
-                                    {sizeIds.map(sid => { const c = cell(cid, sid); return c ? <Cell key={sid} t={c} /> : <td key={sid} className="px-2 py-1.5 text-center text-slate-300">—</td>; })}
-                                    <Cell t={total(row)} strong />
-                                </tr>
-                            );
-                        })}
-                    </tbody>
-                    <tfoot className="border-t-2 border-slate-200 bg-slate-50">
-                        <tr><td className="px-3 py-1.5 font-bold">Total<span className="block text-[11px] font-normal text-slate-500">ordered {total(d.cells).ordered}</span></td>
-                            {sizeIds.map(sid => <Cell key={sid} t={total(d.cells.filter(x => x.size_id === sid))} strong />)}
-                            <Cell t={total(d.cells)} strong /></tr>
-                    </tfoot>
-                </table>
-            </section>
-
-            {/* Fabric */}
-            <section className="bg-white border border-slate-200 rounded-xl mb-4 overflow-x-auto">
-                <div className="px-4 pt-3 pb-2 flex flex-wrap items-baseline gap-2">
-                    <h2 className="font-bold text-slate-800">Fabric at cutting</h2>
-                    <span className="text-xs text-slate-500">Received for this order, not on a batch. Marker length per garment: {Object.entries(d.marker_basis).map(([cid, t]) => <span key={cid} className="mr-2"><b>{colourName.get(cid)}</b> {t}</span>).slice(0, 1)}</span>
-                </div>
-                <table className="w-full text-sm min-w-[720px]">
-                    <thead className="bg-slate-50 text-left text-xs font-bold text-slate-500 uppercase tracking-wider"><tr><th className="px-3 py-2">Colour</th><th className="px-3 py-2 text-right">Rolls</th><th className="px-3 py-2 text-right">End bits</th><th className="px-3 py-2 text-right">On lays</th><th className="px-3 py-2 text-right">Not on a lay</th><th className="px-3 py-2 text-right">Garments still to plan</th><th className="px-3 py-2 text-right">Fabric they need</th></tr></thead>
-                    <tbody>
-                        {d.fabric.length === 0 && <tr><td colSpan={7} className="px-4 py-6 text-center text-slate-400">No fabric received at cutting for this order line. Issue it first (Issue fabric), and receive it at cutting.</td></tr>}
-                        {d.fabric.map(f => (
-                            <tr key={f.colour_id} className="border-t border-slate-100">
-                                <td className="px-3 py-2 font-semibold">{colourName.get(f.colour_id)}</td>
-                                <td className="px-3 py-2 text-right tabular-nums">{f.rolls}</td>
-                                <td className="px-3 py-2 text-right tabular-nums">{f.pieces}</td>
-                                <td className="px-3 py-2 text-right tabular-nums">{qtyText(f.on_lays)}</td>
-                                <td className="px-3 py-2 text-right tabular-nums">{qtyText(f.free)}</td>
-                                <td className="px-3 py-2 text-right tabular-nums">{f.still_to_plan}</td>
-                                <td className={`px-3 py-2 text-right tabular-nums ${f.short ? 'text-rose-700 font-bold' : ''}`}>{f.needed ? `${fmt(f.needed.qty, 2)} ${f.needed.uom}${f.short ? ' — short' : ''}` : '—'}</td>
-                            </tr>
-                        ))}
-                    </tbody>
-                    {d.fabric.length > 0 && (
-                        <tfoot className="border-t-2 border-slate-200 bg-slate-50 text-xs font-bold text-slate-700">
-                            <tr><td className="px-3 py-2">Total</td>
-                                <td className="px-3 py-2 text-right tabular-nums">{d.fabric.reduce((s, f) => s + f.rolls, 0)}</td>
-                                <td className="px-3 py-2 text-right tabular-nums">{d.fabric.reduce((s, f) => s + f.pieces, 0)}</td>
-                                <td className="px-3 py-2 text-right tabular-nums">{qtyText(d.fabric.reduce((a, f) => { for (const [u, v] of Object.entries(f.on_lays)) a[u] = (a[u] || 0) + v; return a; }, {}))}</td>
-                                <td className="px-3 py-2 text-right tabular-nums">{qtyText(d.fabric.reduce((a, f) => { for (const [u, v] of Object.entries(f.free)) a[u] = (a[u] || 0) + v; return a; }, {}))}</td>
-                                <td className="px-3 py-2 text-right tabular-nums">{d.fabric.reduce((s, f) => s + f.still_to_plan, 0)}</td>
-                                <td className="px-3 py-2 text-right tabular-nums">{qtyText(d.fabric.reduce((a, f) => { if (f.needed) a[f.needed.uom] = (a[f.needed.uom] || 0) + f.needed.qty; return a; }, {}))}</td></tr>
-                        </tfoot>
-                    )}
-                </table>
-            </section>
-
-            {/* Lays */}
             <div className="flex flex-wrap items-center gap-2 mb-3">
-                <h2 className="font-bold text-slate-800 mr-2">Lays</h2>
-                {can && <PrimaryButton onClick={suggest} busy={busy} disabled={busy}><Wand2 size={15} /> {openLays.length ? 'Suggest again' : 'Suggest plan'}</PrimaryButton>}
-                {can && !adding && <SecondaryButton disabled={busy} onClick={() => setAdding(true)}><Plus size={15} /> Add lay</SecondaryButton>}
-                <span className="ml-auto text-xs text-slate-500">{d.lays.length} lay{d.lays.length === 1 ? '' : 's'}{d.rules.max_lays ? ` of ${d.rules.max_lays}` : ''} · {new Set(d.lays.filter(l => l.ratio_sum).map(l => `${JSON.stringify(l.ratio)}|${l.marker_length_in}`)).size} marker(s){d.rules.max_markers ? ` of ${d.rules.max_markers}` : ''} · {d.lays.reduce((s, l) => s + l.plies, 0)} plies · {d.lays.reduce((s, l) => s + l.garment_count, 0)} garments</span>
+                <h2 className="font-bold text-slate-800 mr-2">Markers and lays</h2>
+                {can && !adding && <PrimaryButton disabled={busy} onClick={() => setAdding(true)}><Plus size={15} /> New marker</PrimaryButton>}
+                {can && (open.length > 0 || d.allowance_pct !== d.order_allowance_pct) && <SecondaryButton disabled={busy} onClick={() => {
+                    const kept = d.lays.length - open.length;
+                    if (window.confirm(`Reset the whole plan?\n\n${open.length} lay${open.length === 1 ? '' : 's'} not yet a batch will be removed and the cut allowance goes back to the order's ${d.order_allowance_pct}%.${kept ? `\n${kept} lay${kept === 1 ? ' that is a batch stays' : 's that are batches stay'} (change those batches themselves).` : ''}`)) {
+                        run(() => cuttingApi.resetPlan(lineId), () => { setAdding(false); setMsg('Plan reset — start again with a new marker.'); });
+                    }
+                }}><RotateCcw size={15} /> Reset plan</SecondaryButton>}
+                <span className="ml-auto text-xs text-slate-500">{d.lays.length} lay{d.lays.length === 1 ? '' : 's'} ({open.length} planned, {d.lays.length - open.length} batches) · {open.reduce((s, l) => s + l.plies, 0)} plies · {open.reduce((s, l) => s + l.garment_count, 0)} garments planned · {qtyText(addQty(open.flatMap(l => Object.entries(l.fabric).map(([uom, v]) => ({ uom, v }))), x => x.v))} fabric</span>
             </div>
-            {(general.length > 0 || (d.suggestion_warnings || []).length > 0) && (
+            {general.length > 0 && (
                 <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                    {[...(d.suggestion_warnings || []), ...general].map(w => <p key={w} className="flex items-start gap-1.5"><AlertTriangle size={14} className="mt-0.5 shrink-0" /> {w}</p>)}
+                    {general.map(w => <p key={w} className="flex items-start gap-1.5"><AlertTriangle size={14} className="mt-0.5 shrink-0" /> {w}</p>)}
                 </div>
             )}
-            {d.lays.length === 0 && !adding && <p className="mb-4 text-sm text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-6 text-center">No lays yet. {can ? 'Suggest a plan from the order and the fabric at cutting, or add a lay yourself.' : ''}</p>}
+            {d.lays.length === 0 && !adding && <p className="mb-4 text-sm text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-6 text-center">No lays yet. {can ? 'Add a marker: its size ratio, then tick the rolls to lay it on.' : ''}</p>}
             <div className="space-y-3 mb-4">
-                {d.lays.map(l => <LayCard key={l.id} lay={l} d={d} rules={d.rules} can={can} busy={busy} warnings={layWarnings(l.lay_no)} sizeName={sizeName} colourName={colourName}
+                {d.lays.map(l => <LayCard key={l.id} lay={l} d={d} can={can} busy={busy} warnings={layWarnings(l.lay_no)} sizeName={sizeName} colourName={colourName}
                     onSave={(body) => run(() => cuttingApi.updatePlanLay(l.id, body))}
-                    onRemove={() => { if (window.confirm(`Remove lay ${l.lay_no}?`)) run(() => cuttingApi.removePlanLay(l.id)); }}
+                    onRemove={() => { if (window.confirm(`Remove lay ${l.lay_no}?${d.lays.some(x => x.rolls.some(y => y.tail_of_lay_no === l.lay_no)) ? ' A later lay uses an end it leaves.' : ''}`)) run(() => cuttingApi.removePlanLay(l.id)); }}
                     onBatch={(mode) => run(() => cuttingApi.batchFromLay(l.id, { numbering_mode: mode }), (b) => navigate(`/v3/cutting/batches/${b.id}`))} />)}
-                {adding && <LayCard lay={null} d={d} rules={d.rules} can={can} busy={busy} warnings={[]} sizeName={sizeName} colourName={colourName}
+                {adding && <LayCard lay={null} d={d} can={can} busy={busy} warnings={[]} sizeName={sizeName} colourName={colourName}
                     onSave={(body) => run(() => cuttingApi.addPlanLay(lineId, body), () => setAdding(false))} onCancel={() => setAdding(false)} />}
             </div>
 
@@ -243,42 +111,94 @@ export default function CutPlanPage() {
     );
 }
 
-// One lay: shown, or edited (ratio, marker length, rolls with planned plies). lay = null → a new lay.
-function LayCard({ lay, d, rules, can, busy, warnings, sizeName, colourName, onSave, onRemove, onBatch, onCancel }) {
+// Target per colour × size: (cut / on batches + planned) / target, the order under it; the fabric still free per colour.
+function TargetTable({ d, can, busy, allowance, setAllowance, colourName, onSaveAllowance }) {
+    const sizes = d.sizes.filter(s => d.cells.some(x => x.size_id === s.id));
+    const colourIds = [...new Set(d.cells.map(x => x.colour_id))];
+    const cell = (cid, sid) => d.cells.find(x => x.colour_id === cid && x.size_id === sid);
+    // Gap per size (short of the order / over the target); a total adds the sizes' gaps, so one size's over doesn't hide another's short.
+    const gapOf = (x) => ({ short: Math.max(0, x.ordered - x.covered - x.planned), over: Math.max(0, x.covered + x.planned - x.target) });
+    const total = (list) => list.reduce((a, x) => ({ target: a.target + x.target, covered: a.covered + x.covered, planned: a.planned + x.planned, ordered: a.ordered + x.ordered,
+        short: a.short + gapOf(x).short, over: a.over + gapOf(x).over, anyShort: a.anyShort || x.covered + x.planned < x.ordered }), { target: 0, covered: 0, planned: 0, ordered: 0, short: 0, over: 0, anyShort: false });
+    // Red: below the order (a total: any size below) · amber: above the target · green: order covered, up to the target.
+    const tone = (t) => (!t.target && !t.covered && !t.planned ? '' : t.anyShort || t.covered + t.planned < t.ordered ? 'bg-rose-50 text-rose-800' : t.covered + t.planned > t.target ? 'bg-amber-50 text-amber-800' : 'bg-emerald-50 text-emerald-800');
+    // (cut + planned) / target, then the gap: "−n to order", "✓" or "+n over"; "n cut + n plan" only when both are there.
+    const Cell = ({ t, strong }) => {
+        const g = t.short !== undefined ? t : gapOf(t);
+        const gap = [g.short > 0 && `−${g.short} to order`, g.over > 0 && `+${g.over} over`].filter(Boolean);
+        return (
+            <td className={`px-2 py-1.5 text-center tabular-nums ${tone(t)} ${strong ? 'font-bold' : ''}`}>
+                <span className="font-bold">{t.covered + t.planned}</span><span className="text-slate-500"> / {t.target}</span>
+                {(t.target > 0 || t.covered + t.planned > 0) && (gap.length ? gap.map(x => <span key={x} className="block text-[11px] font-semibold whitespace-nowrap">{x}</span>) : <span className="block text-[11px] font-semibold">✓</span>)}
+                {t.covered > 0 && t.planned > 0 && <span className="block text-[10px] font-normal text-slate-500 whitespace-nowrap">{t.covered} cut + {t.planned} plan</span>}
+            </td>
+        );
+    };
+    const fab = (cid) => d.fabric.find(f => f.colour_id === cid);
+    const allFree = d.fabric.reduce((a, f) => { for (const [u, v] of Object.entries(f.free)) a[u] = (a[u] || 0) + v; return a; }, {});
+    const changed = Number(allowance) !== d.allowance_pct;
+    return (
+        <section className="bg-white border border-slate-200 rounded-xl mb-4 overflow-x-auto">
+            <div className="px-4 pt-3 pb-2 flex flex-wrap items-center gap-x-3 gap-y-2">
+                <h2 className="font-bold text-slate-800">Target</h2>
+                <span className="text-xs text-slate-500">Cut or on batches + planned / order + {d.allowance_pct}% (order's own {d.order_allowance_pct}%). Red: below the order · green: order covered, up to the target · amber: above the target.</span>
+                {can && <span className="ml-auto flex items-center gap-1.5 text-xs font-bold text-slate-600">Allowance %
+                    <input className={`${inputCls} !w-20 !py-1`} type="number" min="0" max="50" step="0.5" value={allowance} onChange={e => setAllowance(e.target.value)} aria-label="Cut allowance %" />
+                    {changed && <SecondaryButton disabled={busy} onClick={onSaveAllowance}><Save size={14} /> Save</SecondaryButton>}</span>}
+            </div>
+            <table className="w-full text-sm min-w-[760px]">
+                <thead className="bg-slate-50 text-xs font-bold text-slate-500 uppercase tracking-wider"><tr><th className="px-3 py-2 text-left">Colour</th>{sizes.map(s => <th key={s.id} className="px-2 py-2 text-center">{s.name}</th>)}<th className="px-2 py-2 text-center">Total</th><th className="px-3 py-2 text-right">Fabric free</th><th className="px-3 py-2 text-right">≈ garments more</th></tr></thead>
+                <tbody>
+                    {colourIds.map(cid => {
+                        const row = d.cells.filter(x => x.colour_id === cid);
+                        const f = fab(cid);
+                        return (
+                            <tr key={cid} className="border-t border-slate-100">
+                                <td className="px-3 py-1.5 font-semibold whitespace-nowrap">{colourName.get(cid)}<span className="block text-[11px] font-normal text-slate-500">ordered {total(row).ordered}</span></td>
+                                {sizes.map(s => { const c = cell(cid, s.id); return c ? <Cell key={s.id} t={c} /> : <td key={s.id} className="px-2 py-1.5 text-center text-slate-300">—</td>; })}
+                                <Cell t={total(row)} strong />
+                                <td className="px-3 py-1.5 text-right tabular-nums">{qtyText(f?.free)}<span className="block text-[11px] text-slate-500">{f?.pieces || 0} piece{f?.pieces === 1 ? '' : 's'}</span></td>
+                                <td className={`px-3 py-1.5 text-right tabular-nums ${f && f.garments_possible != null && f.garments_possible < f.short_of_order ? 'text-rose-700 font-bold' : ''}`}>{f?.garments_possible ?? '—'}{f?.short_of_order ? <span className="block text-[11px] font-normal text-slate-500">{f.short_of_order} still short of the order</span> : null}</td>
+                            </tr>
+                        );
+                    })}
+                </tbody>
+                <tfoot className="border-t-2 border-slate-200 bg-slate-50">
+                    <tr><td className="px-3 py-1.5 font-bold">Total<span className="block text-[11px] font-normal text-slate-500">ordered {total(d.cells).ordered}</span></td>
+                        {sizes.map(s => <Cell key={s.id} t={total(d.cells.filter(x => x.size_id === s.id))} strong />)}
+                        <Cell t={total(d.cells)} strong />
+                        <td className="px-3 py-1.5 text-right tabular-nums font-bold">{qtyText(allFree)}</td>
+                        <td className="px-3 py-1.5 text-right tabular-nums font-bold">{d.fabric.reduce((s, f) => s + (f.garments_possible || 0), 0)}<span className="block text-[11px] font-normal text-slate-500">{d.fabric.reduce((s, f) => s + f.short_of_order, 0)} short of the order</span></td></tr>
+                </tfoot>
+            </table>
+            <p className="px-4 py-2 text-xs text-slate-500">Fabric per garment: {[...new Set(Object.values(d.length_basis || {}))].join(' · ') || '—'}. "≈ garments more" = free fabric ÷ that length.</p>
+        </section>
+    );
+}
+
+// One lay = one marker: shown, or set (size ratio → length worked out; tick the pieces to lay it on).
+function LayCard({ lay, d, can, busy, warnings, sizeName, colourName, onSave, onRemove, onBatch, onCancel }) {
     const fresh = () => ({
         ratio: Object.fromEntries(Object.entries(lay?.ratio || {}).map(([k, v]) => [k, String(v)])),
-        marker: lay?.marker_length_in ? String(lay.marker_length_in) : '',
-        rolls: (lay?.rolls || []).map(x => ({ key: x.key, garment_colour_id: x.garment_colour_id, planned_plies: String(x.planned_plies) })),
+        rolls: Object.fromEntries((lay?.rolls || []).map(x => [x.key, { garment_colour_id: x.garment_colour_id, planned_plies: String(x.planned_plies) }])),
         notes: lay?.notes || '',
     });
     const [edit, setEdit] = useState(!lay);
     const [f, setF] = useState(fresh);
     const [mode, setMode] = useState('MODE_1');
-    const [pick, setPick] = useState('');
+    const [colourFilter, setColourFilter] = useState('');
     useEffect(() => { if (!edit) setF(fresh()); }, [lay, edit]); // eslint-disable-line react-hooks/exhaustive-deps
-    const rollOf = (key) => d.rolls.find(r => r.key === key);
-    const ratioSum = Object.values(f.ratio).reduce((s, v) => s + (Number(v) || 0), 0);
-    const estimate = () => {
-        const per = d.length_per_size[f.rolls[0]?.garment_colour_id] || Object.values(d.length_per_size)[0] || {};
-        const v = Object.entries(f.ratio).reduce((s, [sid, n]) => s + (Number(n) || 0) * (per[sid] || 0), 0);
-        return v ? Math.round(v * 100) / 100 : null;
-    };
-    const free = d.rolls.filter(r => (!r.on_lay || r.on_lay === lay?.lay_no) && !f.rolls.some(x => x.key === r.key));
-    const save = () => onSave({
-        ratios: Object.entries(f.ratio).filter(([, v]) => Number(v) > 0).map(([size_id, v]) => ({ size_id, ratio: Number(v) })),
-        marker_length_in: f.marker === '' ? null : Number(f.marker), notes: f.notes,
-        rolls: f.rolls.map(x => ({ key: x.key, garment_colour_id: x.garment_colour_id, planned_plies: Number(x.planned_plies) || 0 })),
-    });
     const batched = lay?.batch;
-    const title = lay ? `Lay ${lay.lay_no}` : 'New lay';
+    const title = lay ? `Lay ${lay.lay_no}` : 'New marker';
     if (!edit) {
+        const waits = [...new Set(lay.rolls.filter(x => x.key.startsWith('T:')).map(x => x.tail_of_lay_no))].filter(Boolean);
         return (
             <div className={`bg-white border rounded-xl ${batched ? 'border-emerald-200' : warnings.length ? 'border-amber-300' : 'border-slate-200'}`}>
                 <div className="px-4 py-3 flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-slate-100">
                     <h3 className="font-bold text-slate-800">{title}</h3>
                     <span className="text-sm">{d.sizes.filter(s => lay.ratio[s.id]).map(s => <span key={s.id} className="inline-block mr-1.5 px-1.5 py-0.5 rounded bg-slate-100 text-xs font-bold">{s.name}×{lay.ratio[s.id]}</span>)}</span>
-                    <span className="text-xs text-slate-600">marker <b>{lay.marker_length_in ?? '—'} in</b>{lay.ply_length_in ? ` · ply ${lay.ply_length_in} in` : ''} · <b>{lay.plies}</b> plies · <b>{lay.garment_count}</b> garments{lay.fabric.length ? ` · ${lay.fabric.map(x => `${fmt(x.qty, 2)} ${x.uom}`).join(' + ')}` : ''}{lay.narrowest_width_in ? ` · marker width ≤ ${lay.narrowest_width_in} in` : ''}</span>
-                    {lay.source === 'SUGGESTED' && !batched && <span className="text-[11px] font-bold px-1.5 py-0.5 rounded border border-indigo-200 bg-indigo-50 text-indigo-700">suggested</span>}
+                    <span className="text-xs text-slate-600">marker <b>{inText(lay.marker_length_in)}</b> · <b>{lay.plies}</b> plies · <b>{lay.garment_count}</b> garments · {qtyText(lay.fabric)} used · end bits {qtyText(lay.end_bits)}</span>
+                    {waits.length > 0 && !batched && <span className="text-[11px] font-bold px-1.5 py-0.5 rounded border border-slate-300 bg-slate-50 text-slate-700">after lay {waits.join(', ')} is cut</span>}
                     <span className="ml-auto flex flex-wrap items-center gap-2">
                         {batched
                             ? <Link to={`/v3/cutting/batches/${batched.id}`} className="text-sm font-semibold text-emerald-700 hover:underline">Batch #{batched.floor_no} {batched.batch_code} <span className={`ml-1 text-[11px] font-black px-1.5 py-0.5 rounded border ${CUT_STATUS[batched.status]?.cls || ''}`}>{CUT_STATUS[batched.status]?.label || batched.status}</span></Link>
@@ -286,86 +206,173 @@ function LayCard({ lay, d, rules, can, busy, warnings, sizeName, colourName, onS
                                 <SecondaryButton disabled={busy} onClick={() => setEdit(true)}><Pencil size={14} /> Edit</SecondaryButton>
                                 <SecondaryButton disabled={busy} onClick={onRemove}><Trash2 size={14} /> Remove</SecondaryButton>
                                 <select className="px-2 py-2 text-sm border border-slate-300 rounded-lg" value={mode} onChange={e => setMode(e.target.value)} aria-label="Piece numbering"><option value="MODE_1">Numbering per roll</option><option value="MODE_2">Numbering continuous</option></select>
-                                <PrimaryButton disabled={busy || !d.cutting_gate.allowed || !lay.rolls.length || !lay.marker_length_in || !lay.ratio_sum} onClick={() => onBatch(mode)}><Scissors size={14} /> Create batch</PrimaryButton>
+                                <PrimaryButton disabled={busy || !d.cutting_gate.allowed || !lay.rolls.length || !lay.marker_length_in || !lay.ratio_sum || waits.length > 0} onClick={() => onBatch(mode)} title={waits.length ? `It lays a roll end — cut lay ${waits.join(', ')} first` : undefined}><Scissors size={14} /> Create batch</PrimaryButton>
                             </>}
                     </span>
                 </div>
                 {lay.batch_cancelled && <p className="px-4 pt-2 text-xs text-slate-500">Batch #{lay.batch_cancelled.floor_no} made from this lay was cancelled — the lay is open again.</p>}
                 {warnings.length > 0 && <div className="px-4 pt-2 text-sm text-amber-900">{warnings.map(w => <p key={w} className="flex items-start gap-1.5"><AlertTriangle size={14} className="mt-0.5 shrink-0" /> {w.replace(/^Lay \d+: /, '')}</p>)}</div>}
-                <LayRolls lay={lay} rows={lay.rolls.map(x => ({ ...x, roll: rollOf(x.key) }))} colourName={colourName} />
+                <GarmentsLine lay={lay} d={d} colourName={colourName} />
+                <PiecesTable rows={lay.rolls} colourName={colourName} />
             </div>
         );
     }
-    // Edit mode: figures computed here as you type; the server checks again on save.
-    const rows = f.rolls.map(x => {
-        const r = rollOf(x.key);
-        const max = r ? maxPlies(r, f.marker, rules) : null;
-        const p = plyIn(f.marker, rules);
-        const uses = r && p && LEN_PER_IN[r.uom] ? (Number(x.planned_plies) || 0) * p * LEN_PER_IN[r.uom] : null;
-        return { ...x, roll: r, max, uses, end_bit: uses != null ? r.length - uses : null };
+    // Set the marker: the pieces to pick from are the plan's free ones (an end an earlier lay leaves included), plus this lay's own.
+    const own = (lay?.rolls || []).map(x => ({ ...x, colour_ids: [x.garment_colour_id] }));
+    const pool = [...own, ...d.free.filter(p => !own.some(o => o.key === p.key) && !(lay && p.tail_of_lay_no != null && p.tail_of_lay_no >= lay.lay_no))];
+    const tickedKeys = Object.keys(f.rolls);
+    const colours = [...new Set(tickedKeys.map(k => f.rolls[k].garment_colour_id))];
+    const marker = markerOf(f.ratio, colours, d);
+    const ratioSum = Object.values(f.ratio).reduce((s, v) => s + (Number(v) || 0), 0);
+    const rows = pool.map(p => {
+        const t = f.rolls[p.key];
+        const max = pliesOf(p, marker);
+        const plies = t ? (t.planned_plies === '' ? (max ?? 0) : Number(t.planned_plies) || 0) : (max ?? 0);
+        const uses = marker && LEN_PER_IN[p.uom] ? plies * marker * LEN_PER_IN[p.uom] : null;
+        return { ...p, ticked: Boolean(t), colour: t?.garment_colour_id || p.colour_ids?.[0], max, plies, uses, end_bit: uses != null ? p.length - uses : null };
     });
-    const plies = rows.reduce((s, x) => s + (Number(x.planned_plies) || 0), 0);
-    const est = estimate();
+    const ticked = rows.filter(r => r.ticked);
+    const shown = rows.filter(r => r.ticked || !colourFilter || (r.colour_ids || []).includes(colourFilter));
+    const plies = ticked.reduce((s, r) => s + r.plies, 0);
+    // Select all: every piece shown (the colour filter applies) that gives at least a ply of this marker; again = clear them.
+    const selectable = shown.filter(r => r.max == null || r.max > 0);
+    const allOn = selectable.length > 0 && selectable.every(r => r.ticked);
+    const selectAll = () => {
+        const next = { ...f.rolls };
+        for (const r of selectable) {
+            if (allOn) delete next[r.key];
+            else if (!next[r.key]) next[r.key] = { garment_colour_id: r.colour_ids[0], planned_plies: '' };
+        }
+        setF({ ...f, rolls: next });
+    };
+    const tick = (r, on) => {
+        const next = { ...f.rolls };
+        if (on) next[r.key] = { garment_colour_id: r.colour_ids[0], planned_plies: '' }; else delete next[r.key];
+        setF({ ...f, rolls: next });
+    };
+    const save = () => onSave({
+        ratios: Object.entries(f.ratio).filter(([, v]) => Number(v) > 0).map(([size_id, v]) => ({ size_id, ratio: Number(v) })), notes: f.notes,
+        rolls: ticked.map(r => ({ key: r.key, label: r.label, garment_colour_id: r.colour, planned_plies: f.rolls[r.key].planned_plies === '' ? null : Number(f.rolls[r.key].planned_plies) })),
+    });
+    const preview = { ratio: Object.fromEntries(Object.entries(f.ratio).filter(([, v]) => Number(v) > 0).map(([k, v]) => [k, Number(v)])),
+        plies_by_colour: ticked.reduce((a, r) => { a[r.colour] = (a[r.colour] || 0) + r.plies; return a; }, {}) };
     return (
         <div className="bg-white border-2 border-indigo-300 rounded-xl p-4">
             <div className="flex flex-wrap items-center gap-2 mb-3">
                 <h3 className="font-bold text-slate-800">{title}</h3>
-                <span className="text-xs text-slate-500">{ratioSum} garments per marker · {plies} plies · {plies * ratioSum} garments</span>
+                <span className="text-xs text-slate-500">{ratioSum} garments per marker · marker {inText(marker)} · {ticked.length} picked · {plies} plies · {plies * ratioSum} garments · {qtyText(addQty(ticked, r => r.uses))} used · end bits {qtyText(addQty(ticked, r => r.end_bit))}</span>
                 <span className="ml-auto flex gap-2">
-                    <PrimaryButton busy={busy} disabled={busy} onClick={save}><Save size={14} /> Save lay</PrimaryButton>
+                    <PrimaryButton busy={busy} disabled={busy || !ratioSum || !ticked.length || ticked.some(r => r.max === 0 || (r.max != null && r.plies > r.max))} onClick={save}><Save size={14} /> Save lay</PrimaryButton>
                     <SecondaryButton disabled={busy} onClick={() => { if (lay) { setEdit(false); setF(fresh()); } else onCancel(); }}><X size={14} /> Cancel</SecondaryButton>
                 </span>
             </div>
             <div className="flex flex-wrap items-end gap-4 mb-3">
                 <div>
-                    <p className="text-xs font-bold text-slate-600 mb-1">Size ratio</p>
+                    <p className="text-xs font-bold text-slate-600 mb-1">1. Size ratio (garments of each size in the marker)</p>
                     <div className="flex flex-wrap gap-2">{d.sizes.map(s => (
                         <label key={s.id} className="text-center"><span className="block text-xs font-bold text-slate-600">{s.name}</span>
                             <input className={`${inputCls} !w-14 text-center`} type="number" min="0" step="1" value={f.ratio[s.id] || ''} onChange={e => setF({ ...f, ratio: { ...f.ratio, [s.id]: e.target.value } })} aria-label={`Ratio ${s.name}`} /></label>
                     ))}</div>
                 </div>
-                <Field label="Marker length (in)" hint={est ? `Estimate ${est} in` : ' '}>
-                    <div className="flex gap-1"><input className={`${inputCls} !w-28`} type="number" min="1" step="0.01" value={f.marker} onChange={e => setF({ ...f, marker: e.target.value })} />
-                        {est && <button type="button" className="px-2 text-xs font-semibold text-indigo-700 border border-indigo-200 rounded-lg hover:bg-indigo-50" onClick={() => setF({ ...f, marker: String(est) })}>Use</button>}</div>
-                </Field>
-                <div className="flex-1 min-w-[12rem]"><Field label="Notes"><input className={inputCls} value={f.notes} onChange={e => setF({ ...f, notes: e.target.value })} /></Field></div>
+                <div className="text-sm"><p className="text-xs font-bold text-slate-600 mb-1">Marker length (worked out)</p><p className="font-bold text-slate-800 py-2">{inText(marker)}</p></div>
+                <label className="flex-1 min-w-[12rem] text-xs font-bold text-slate-600">Notes<input className={`${inputCls} mt-1`} value={f.notes} onChange={e => setF({ ...f, notes: e.target.value })} /></label>
             </div>
-            <div className="overflow-x-auto">
-                <table className="w-full text-sm min-w-[760px]">
-                    <thead className="bg-slate-50 text-left text-xs font-bold text-slate-500 uppercase tracking-wider"><tr><th className="px-2 py-2">Roll</th><th className="px-2 py-2">Colour</th><th className="px-2 py-2">Shade · width</th><th className="px-2 py-2 text-right">Length</th><th className="px-2 py-2 text-right">Plies (max)</th><th className="px-2 py-2 text-right">Uses</th><th className="px-2 py-2 text-right">End bit</th><th /></tr></thead>
+            <div className="flex flex-wrap items-center gap-2 mb-1.5">
+                <p className="text-xs font-bold text-slate-600">2. Tick the rolls / end bits to lay it on</p>
+                {selectable.length > 0 && <button type="button" onClick={selectAll} className="text-xs font-bold text-indigo-700 hover:underline">{allOn ? 'Clear' : `Select all ${selectable.length}${colourFilter ? ` ${colourName.get(colourFilter)}` : ''}`}</button>}
+                <select className={`${inputCls} !w-auto !py-1 text-xs`} value={colourFilter} onChange={e => setColourFilter(e.target.value)} aria-label="Show the fabric of">
+                    <option value="">All colours</option>{d.colours.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+            </div>
+            <div className="overflow-x-auto max-h-[46vh] overflow-y-auto border border-slate-200 rounded-lg">
+                <table className="w-full text-sm min-w-[820px]">
+                    <thead className="bg-slate-50 text-left text-xs font-bold text-slate-500 uppercase tracking-wider sticky top-0"><tr><th className="px-2 py-2 w-8"><input type="checkbox" className="w-4 h-4" checked={allOn} disabled={!selectable.length} onChange={selectAll} aria-label={allOn ? 'Clear the rolls shown' : 'Select all rolls shown'} title={allOn ? 'Clear' : 'Select all shown that give a ply'} /></th><th className="px-2 py-2">Roll</th><th className="px-2 py-2">Colour</th><th className="px-2 py-2">Shade · width</th><th className="px-2 py-2 text-right">Length</th><th className="px-2 py-2 text-right">Plies (gives)</th><th className="px-2 py-2 text-right">Uses</th><th className="px-2 py-2 text-right">End bit</th></tr></thead>
                     <tbody>
-                        {rows.length === 0 && <tr><td colSpan={8} className="px-3 py-4 text-center text-slate-400">No rolls on this lay yet — add them below.</td></tr>}
-                        {rows.map((x, i) => (
-                            <tr key={x.key} className="border-t border-slate-100">
-                                <td className="px-2 py-1.5 font-semibold">{x.roll?.label || x.key}{x.roll?.lay_piece && <span className="ml-1 text-[11px] font-bold text-amber-700">end bit</span>}</td>
-                                <td className="px-2 py-1.5">{x.roll && x.roll.colour_ids.length > 1
-                                    ? <select className={`${inputCls} !py-1`} value={x.garment_colour_id} onChange={e => setF({ ...f, rolls: f.rolls.map((y, j) => (j === i ? { ...y, garment_colour_id: e.target.value } : y)) })}>{x.roll.colour_ids.map(c => <option key={c} value={c}>{colourName.get(c)}</option>)}</select>
-                                    : colourName.get(x.garment_colour_id)}</td>
-                                <td className="px-2 py-1.5 text-xs">{x.roll?.shade_group || '—'} · {x.roll ? widthText(x.roll) : '—'}</td>
-                                <td className="px-2 py-1.5 text-right tabular-nums">{x.roll ? `${fmt(x.roll.length, 2)} ${x.roll.uom}` : '—'}</td>
-                                <td className="px-2 py-1.5 text-right"><input className={`${inputCls} !w-20 !py-1 text-right ${x.max != null && Number(x.planned_plies) > x.max ? 'border-rose-400' : ''}`} type="number" min="0" step="1" value={x.planned_plies} onChange={e => setF({ ...f, rolls: f.rolls.map((y, j) => (j === i ? { ...y, planned_plies: e.target.value } : y)) })} aria-label={`Plies on ${x.roll?.label}`} />
-                                    <span className="ml-1 text-xs text-slate-500">({x.max ?? '—'})</span></td>
-                                <td className="px-2 py-1.5 text-right tabular-nums">{x.uses != null ? fmt(x.uses, 2) : '—'}</td>
-                                <td className={`px-2 py-1.5 text-right tabular-nums ${x.end_bit != null && x.end_bit < 0 ? 'text-rose-700 font-bold' : ''}`}>{x.end_bit != null ? fmt(x.end_bit, 2) : '—'}</td>
-                                <td className="px-2 py-1.5 text-right"><button type="button" className="p-1 text-rose-600 hover:bg-rose-50 rounded" onClick={() => setF({ ...f, rolls: f.rolls.filter((_, j) => j !== i) })} aria-label="Take off the lay"><X size={14} /></button></td>
+                        {shown.length === 0 && <tr><td colSpan={8} className="px-3 py-4 text-center text-slate-400">No fabric free at cutting{colourFilter ? ' for this colour' : ''} — issue it and receive it at cutting.</td></tr>}
+                        {shown.map(r => (
+                            <tr key={r.key} className={`border-t border-slate-100 ${r.ticked ? 'bg-indigo-50' : r.max === 0 ? 'opacity-50' : ''}`}>
+                                <td className="px-2 py-1.5"><input type="checkbox" className="w-4 h-4" checked={r.ticked} disabled={!r.ticked && r.max === 0} onChange={e => tick(r, e.target.checked)} aria-label={`Lay on ${r.label}`} /></td>
+                                <td className="px-2 py-1.5 font-semibold whitespace-nowrap">{r.label}{r.roll_end ? <span className="ml-1 text-[11px] font-bold text-slate-600">after lay {r.tail_of_lay_no}</span> : r.lay_piece ? <span className="ml-1 text-[11px] font-bold text-amber-700">end bit</span> : null}</td>
+                                <td className="px-2 py-1.5">{r.ticked && (r.colour_ids || []).length > 1
+                                    ? <select className={`${inputCls} !py-1`} value={r.colour} onChange={e => setF({ ...f, rolls: { ...f.rolls, [r.key]: { ...f.rolls[r.key], garment_colour_id: e.target.value } } })}>{r.colour_ids.map(c => <option key={c} value={c}>{colourName.get(c)}</option>)}</select>
+                                    : (r.colour_ids || []).map(c => colourName.get(c)).join(' / ')}</td>
+                                <td className="px-2 py-1.5 text-xs">{r.shade_group || '—'} · {r.width_text || '—'}</td>
+                                <td className="px-2 py-1.5 text-right tabular-nums">{fmt(r.length, 2)} {r.uom}</td>
+                                <td className="px-2 py-1.5 text-right">{r.ticked
+                                    ? <><input className={`${inputCls} !w-16 !py-1 text-right ${r.max != null && r.plies > r.max ? 'border-rose-400' : ''}`} type="number" min="0" step="1" placeholder={String(r.max ?? '')} value={f.rolls[r.key].planned_plies} onChange={e => setF({ ...f, rolls: { ...f.rolls, [r.key]: { ...f.rolls[r.key], planned_plies: e.target.value } } })} aria-label={`Plies on ${r.label}`} /><span className="ml-1 text-xs text-slate-500">({r.max ?? '—'})</span></>
+                                    : <span className="tabular-nums text-slate-500">{r.max ?? '—'}</span>}</td>
+                                <td className="px-2 py-1.5 text-right tabular-nums">{r.ticked && r.uses != null ? fmt(r.uses, 2) : '—'}</td>
+                                <td className={`px-2 py-1.5 text-right tabular-nums ${r.end_bit != null && r.end_bit < 0 ? 'text-rose-700 font-bold' : ''}`}>{r.ticked && r.end_bit != null ? fmt(r.end_bit, 2) : '—'}</td>
                             </tr>
                         ))}
                     </tbody>
-                    <tfoot className="border-t-2 border-slate-200 bg-slate-50 text-xs font-bold text-slate-700"><tr><td className="px-2 py-1.5" colSpan={3}>Total {rows.length} roll{rows.length === 1 ? '' : 's'}</td><td className="px-2 py-1.5 text-right tabular-nums">{qtyText(rows.reduce((a, x) => { if (x.roll) a[x.roll.uom] = (a[x.roll.uom] || 0) + x.roll.length; return a; }, {}))}</td><td className="px-2 py-1.5 text-right tabular-nums">{plies}</td><td className="px-2 py-1.5 text-right tabular-nums">{qtyText(rows.reduce((a, x) => { if (x.uses != null) a[x.roll.uom] = (a[x.roll.uom] || 0) + x.uses; return a; }, {}))}</td><td className="px-2 py-1.5 text-right tabular-nums">{qtyText(rows.reduce((a, x) => { if (x.end_bit != null) a[x.roll.uom] = (a[x.roll.uom] || 0) + x.end_bit; return a; }, {}))}</td><td /></tr></tfoot>
+                    <tfoot className="border-t-2 border-slate-200 bg-slate-50 text-xs font-bold text-slate-700 sticky bottom-0"><tr><td className="px-2 py-1.5" colSpan={4}>Picked {ticked.length} of {pool.length}</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">{qtyText(addQty(ticked, r => r.length))}</td><td className="px-2 py-1.5 text-right tabular-nums">{plies}</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">{qtyText(addQty(ticked, r => r.uses))}</td><td className="px-2 py-1.5 text-right tabular-nums">{qtyText(addQty(ticked, r => r.end_bit))}</td></tr></tfoot>
                 </table>
             </div>
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-                <select className={`${inputCls} !w-auto max-w-md`} value={pick} onChange={e => setPick(e.target.value)} aria-label="Add a roll">
-                    <option value="">Add a roll free at cutting… ({free.length})</option>
-                    {free.map(r => <option key={r.key} value={r.key}>{r.label} · {fmt(r.length, 2)} {r.uom} · {r.colour_ids.map(c => colourName.get(c)).join('/')}{r.shade_group ? ` · ${r.shade_group}` : ''}{r.width_group ? ` ${r.width_group}` : ''}{maxPlies(r, f.marker, rules) != null ? ` · ${maxPlies(r, f.marker, rules)} plies` : ''}</option>)}
-                </select>
-                <SecondaryButton disabled={!pick} onClick={() => { const r = rollOf(pick); setF({ ...f, rolls: [...f.rolls, { key: r.key, garment_colour_id: r.colour_ids[0], planned_plies: String(maxPlies(r, f.marker, rules) ?? 0) }] }); setPick(''); }}><Plus size={14} /> Add</SecondaryButton>
-            </div>
+            <p className="mt-1 text-xs text-slate-500">Plies: blank = as many as the roll gives (shown in brackets). A roll's end bit can go on a later marker — it is listed "after lay N", and that lay's batch waits until lay N is cut.</p>
+            {ticked.length > 0 && <MarkerPreview preview={preview} saved={lay} d={d} colourName={colourName} />}
         </div>
     );
 }
 
-function LayRolls({ lay, rows, colourName }) {
+// While a marker is being set: per colour on it, the other lays (cut / on batches + planned elsewhere), this lay, and
+// together against the target — every size of the colour, so the sizes this marker leaves out show too.
+// saved = the lay being changed: its saved garments are taken out of "other lays".
+function MarkerPreview({ preview, saved, d, colourName }) {
+    const cids = Object.keys(preview.plies_by_colour || {}).filter(c => preview.plies_by_colour[c] > 0);
+    if (!cids.length) return null;
+    const tone = (v, c) => (!c ? '' : v < c.ordered ? 'bg-rose-50 text-rose-800' : v > c.target ? 'bg-amber-50 text-amber-800' : 'bg-emerald-50 text-emerald-800');
+    return (
+        <div className="mt-3 overflow-x-auto">
+            {cids.map(cid => {
+                const sizes = d.sizes.filter(s => d.cells.some(x => x.colour_id === cid && x.size_id === s.id) || preview.ratio[s.id]);
+                const cell = (sid) => d.cells.find(x => x.colour_id === cid && x.size_id === sid);
+                const mine = (sid) => preview.plies_by_colour[cid] * (preview.ratio[sid] || 0);
+                const before = (sid) => { const c = cell(sid); return c ? c.covered + c.planned - (saved?.batch ? 0 : saved?.garments?.[cid]?.[sid] || 0) : 0; };
+                const sumOf = (f) => sizes.reduce((a, s) => a + f(s.id), 0);
+                const total = { ordered: sumOf(sid => cell(sid)?.ordered || 0), target: sumOf(sid => cell(sid)?.target || 0) };
+                const anyShort = sizes.some(s => cell(s.id) && before(s.id) + mine(s.id) < cell(s.id).ordered);
+                return (
+                    <table key={cid} className="text-xs mb-2 border border-slate-200 rounded-lg">
+                        <thead className="bg-slate-50 text-slate-500"><tr><th className="px-2 py-1 text-left font-bold">{colourName.get(cid)} · {preview.plies_by_colour[cid]} plies</th>{sizes.map(s => <th key={s.id} className="px-2 py-1 font-bold text-center min-w-[64px]">{s.name}</th>)}<th className="px-2 py-1 font-bold text-center min-w-[72px]">Total</th></tr></thead>
+                        <tbody>
+                            <tr className="border-t border-slate-100"><td className="px-2 py-1 text-slate-600">Other lays (cut + planned)</td>{sizes.map(s => <td key={s.id} className="px-2 py-1 text-center tabular-nums">{before(s.id) || '—'}</td>)}<td className="px-2 py-1 text-center tabular-nums font-bold">{sumOf(before)}</td></tr>
+                            <tr className="border-t border-slate-100"><td className="px-2 py-1 font-semibold text-indigo-700">This lay</td>{sizes.map(s => <td key={s.id} className="px-2 py-1 text-center tabular-nums font-semibold text-indigo-700">{mine(s.id) ? `+${mine(s.id)}` : '—'}</td>)}<td className="px-2 py-1 text-center tabular-nums font-bold text-indigo-700">+{sumOf(mine)}</td></tr>
+                        </tbody>
+                        <tfoot className="border-t-2 border-slate-200 font-bold"><tr><td className="px-2 py-1">Total / target</td>
+                            {sizes.map(s => { const c = cell(s.id); const v = before(s.id) + mine(s.id); return <td key={s.id} className={`px-2 py-1 text-center tabular-nums ${tone(v, c)}`}>{v} / {c?.target ?? 0}{c && v < c.ordered ? <span className="block text-[10px] font-semibold">−{c.ordered - v} to order</span> : c && v > c.target ? <span className="block text-[10px] font-semibold">+{v - c.target} over</span> : null}</td>; })}
+                            <td className={`px-2 py-1 text-center tabular-nums ${anyShort ? 'bg-rose-50 text-rose-800' : sumOf(sid => before(sid) + mine(sid)) > total.target ? 'bg-amber-50 text-amber-800' : 'bg-emerald-50 text-emerald-800'}`}>{sumOf(sid => before(sid) + mine(sid))} / {total.target}<span className="block text-[10px] font-semibold">order {total.ordered}</span></td></tr></tfoot>
+                    </table>
+                );
+            })}
+            <p className="text-[11px] text-slate-500">Red: below the order · green: order covered, up to the target · amber: above the target. A total is red if any size is below the order.</p>
+        </div>
+    );
+}
+
+// Garments a lay gives, per colour × size, with totals.
+function GarmentsLine({ lay, d, colourName }) {
+    const cids = Object.keys(lay.plies_by_colour || {}).filter(c => lay.plies_by_colour[c] > 0);
+    if (!cids.length) return null;
+    const sizes = d.sizes.filter(s => lay.ratio[s.id]);
+    return (
+        <div className="px-4 py-2 overflow-x-auto">
+            <table className="text-xs">
+                <thead className="text-slate-500"><tr><th className="pr-3 text-left font-bold">Garments</th>{sizes.map(s => <th key={s.id} className="px-2 font-bold">{s.name}</th>)}<th className="px-2 font-bold">Total</th></tr></thead>
+                <tbody>{cids.map(c => (
+                    <tr key={c}><td className="pr-3 font-semibold">{colourName.get(c)} · {lay.plies_by_colour[c]} plies</td>{sizes.map(s => <td key={s.id} className="px-2 text-center tabular-nums">{lay.plies_by_colour[c] * lay.ratio[s.id]}</td>)}
+                        <td className="px-2 text-center tabular-nums font-bold">{sizes.reduce((a, s) => a + lay.plies_by_colour[c] * lay.ratio[s.id], 0)}</td></tr>
+                ))}</tbody>
+                <tfoot className="border-t border-slate-200 font-bold"><tr><td className="pr-3">Total</td>{sizes.map(s => <td key={s.id} className="px-2 text-center tabular-nums">{cids.reduce((a, c) => a + lay.plies_by_colour[c] * lay.ratio[s.id], 0)}</td>)}
+                    <td className="px-2 text-center tabular-nums">{cids.reduce((a, c) => a + sizes.reduce((b, s) => b + lay.plies_by_colour[c] * lay.ratio[s.id], 0), 0)}</td></tr></tfoot>
+            </table>
+        </div>
+    );
+}
+
+function PiecesTable({ rows, colourName }) {
     if (!rows.length) return <p className="px-4 py-3 text-sm text-slate-400">No rolls on this lay.</p>;
     return (
         <div className="overflow-x-auto">
@@ -373,9 +380,9 @@ function LayRolls({ lay, rows, colourName }) {
                 <thead className="text-left text-xs font-bold text-slate-500 uppercase tracking-wider"><tr><th className="px-4 py-1.5">Roll</th><th className="px-2 py-1.5">Colour</th><th className="px-2 py-1.5">Shade · width</th><th className="px-2 py-1.5 text-right">Length</th><th className="px-2 py-1.5 text-right">Plies</th><th className="px-2 py-1.5 text-right">Uses</th><th className="px-4 py-1.5 text-right">End bit</th></tr></thead>
                 <tbody>{rows.map(x => (
                     <tr key={x.key} className="border-t border-slate-100">
-                        <td className="px-4 py-1.5 font-semibold">{x.label}{x.roll?.lay_piece && <span className="ml-1 text-[11px] font-bold text-amber-700">end bit</span>}</td>
+                        <td className="px-4 py-1.5 font-semibold">{x.label}{x.roll_end ? <span className="ml-1 text-[11px] font-bold text-slate-600">after lay {x.tail_of_lay_no}</span> : x.lay_piece ? <span className="ml-1 text-[11px] font-bold text-amber-700">end bit</span> : null}</td>
                         <td className="px-2 py-1.5">{colourName.get(x.garment_colour_id)}</td>
-                        <td className="px-2 py-1.5 text-xs">{x.shade_group || '—'}{x.width_group ? ` · ${x.width_group}` : ''}{x.roll ? ` · ${widthText(x.roll)}` : ''}</td>
+                        <td className="px-2 py-1.5 text-xs">{x.shade_group || '—'} · {x.width_text || '—'}</td>
                         <td className="px-2 py-1.5 text-right tabular-nums">{x.length != null ? `${fmt(x.length, 2)} ${x.uom}` : '—'}</td>
                         <td className="px-2 py-1.5 text-right tabular-nums font-bold">{x.planned_plies}{x.max_plies != null && x.max_plies !== x.planned_plies ? <span className="font-normal text-slate-400"> / {x.max_plies}</span> : ''}</td>
                         <td className="px-2 py-1.5 text-right tabular-nums">{x.uses != null ? fmt(x.uses, 2) : '—'}</td>
@@ -383,12 +390,11 @@ function LayRolls({ lay, rows, colourName }) {
                     </tr>
                 ))}</tbody>
                 <tfoot className="border-t-2 border-slate-200 bg-slate-50 text-xs font-bold text-slate-700"><tr><td className="px-4 py-1.5" colSpan={3}>Total {rows.length} roll{rows.length === 1 ? '' : 's'}</td>
-                    <td className="px-2 py-1.5 text-right tabular-nums">{qtyText(rows.reduce((a, x) => { if (x.length != null) a[x.uom] = (a[x.uom] || 0) + x.length; return a; }, {}))}</td>
-                    <td className="px-2 py-1.5 text-right tabular-nums">{lay.plies}</td>
-                    <td className="px-2 py-1.5 text-right tabular-nums">{qtyText(rows.reduce((a, x) => { if (x.uses != null) a[x.uom] = (a[x.uom] || 0) + x.uses; return a; }, {}))}</td>
-                    <td className="px-4 py-1.5 text-right tabular-nums">{qtyText(rows.reduce((a, x) => { if (x.end_bit != null) a[x.uom] = (a[x.uom] || 0) + x.end_bit; return a; }, {}))}</td></tr></tfoot>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{qtyText(addQty(rows, x => x.length))}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{rows.reduce((s, x) => s + (Number(x.planned_plies) || 0), 0)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{qtyText(addQty(rows, x => x.uses))}</td>
+                    <td className="px-4 py-1.5 text-right tabular-nums">{qtyText(addQty(rows, x => x.end_bit))}</td></tr></tfoot>
             </table>
         </div>
     );
 }
-

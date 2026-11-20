@@ -1,6 +1,8 @@
 // Raise a debit note on an approved invoice (4 Nov 2026): what it is for, then per invoice line the quantity and rate to claim.
 // Goods returned: the quantity billed for goods since returned, at the billed rate. Rate difference: the difference per unit on
 // the quantity. Someone else approves it.
+// Discounts (20 Nov 2026): a line is worth what was paid after its own and the overall discount; goods returned start at that
+// net rate, and the server caps the rate and the value there.
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, FileMinus } from 'lucide-react';
@@ -34,7 +36,7 @@ export default function NewDebitNotePage() {
     useEffect(() => {
         if (!inv) return;
         setRows(Object.fromEntries(lines.map(l => [l.id, code === 'RETURN'
-            ? { on: l.over_billed > 0.0005, qty: l.over_billed > 0 ? String(l.over_billed) : '', rate: String(l.rate) }
+            ? { on: l.over_billed > 0.0005, qty: l.over_billed > 0 ? String(l.over_billed) : '', rate: String(l.net_rate ?? l.rate) }
             : { on: false, qty: String(l.qty), rate: '' }])));
     }, [inv, lines, code]);
     if (!inv) return <div>{error ? <ErrorBox text={error} /> : <Loading />}</div>;
@@ -70,7 +72,7 @@ export default function NewDebitNotePage() {
                             return <tr key={l.id} className={`border-t border-slate-100 ${r.on ? 'bg-indigo-50/40' : ''}`}>
                                 <td className="px-3 py-2"><input type="checkbox" checked={Boolean(r.on)} onChange={e => setRow(l.id, { on: e.target.checked })} aria-label={`Debit ${l.label}`} /></td>
                                 <td className="px-3 py-2">{l.label}<span className="block text-xs text-slate-500">{l.grn_no} · HSN {l.hsn_code || '—'} · GST {l.gst_pct}%</span></td>
-                                <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{fmt(l.qty)} {l.purchase_uom} @ ₹{inr(l.rate)}</td>
+                                <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{fmt(l.qty)} {l.purchase_uom} @ ₹{inr(l.rate)}{l.net_rate != null && l.net_rate < l.rate - 0.00005 && <span className="block text-[11px] text-slate-500">paid ₹{inr(l.net_rate)} after discounts · worth ₹{inr(l.worth)}</span>}</td>
                                 <td className="px-3 py-2 text-right tabular-nums">{l.over_billed > 0 ? fmt(l.over_billed) : '—'}</td>
                                 <td className="px-3 py-2 text-right tabular-nums">{l.debited_value ? inr(l.debited_value) : '—'}</td>
                                 <td className="px-3 py-2">{r.on && <input className={`${inputCls} !py-1 !px-2 text-right`} type="number" min="0" step="any" value={r.qty} onChange={e => setRow(l.id, { qty: e.target.value })} aria-label="Quantity" />}</td>

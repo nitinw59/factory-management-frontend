@@ -1,7 +1,9 @@
 // Supplier invoices: register with match status, supplier / date / search
 // filters, Excel; factory admin sets the match tolerance here.
+// Two tabs (20 Nov 2026): Invoices, and Waiting for invoice — GRNs with goods not yet billed (WaitingForInvoice.jsx), so accounts
+// see what to enter without first picking a supplier. ?view=waiting opens it (My work links there).
 import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Plus, FileSpreadsheet } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { purchasingApi } from '../api/purchasingApi';
@@ -11,8 +13,48 @@ import { fmtDate, todayLocal } from '../salesOrders/SalesOrderStatusBadge';
 import { useAuth } from '../../context/AuthContext';
 import { inr } from './poShared';
 import { INVOICE_STATUS, APPROVAL_STATUS } from './returnShared';
+import WaitingForInvoice from './WaitingForInvoice';
 
 export default function InvoicesPage() {
+    const navigate = useNavigate();
+    const [params, setParams] = useSearchParams();
+    const view = params.get('view') === 'waiting' ? 'waiting' : 'register';
+    const [waiting, setWaiting] = useState(null);
+    const [waitErr, setWaitErr] = useState('');
+    const [canEnter, setCanEnter] = useState(false);
+    useEffect(() => {
+        purchasingApi.permissions().then(res => setCanEnter(Boolean(res.data.invoice))).catch(() => {});
+        purchasingApi.waitingInvoices().then(res => setWaiting(res.data))
+            .catch(err => { if (err?.response?.status === 403) setWaiting(false); else setWaitErr(apiError(err, 'Failed to load the GRNs waiting for an invoice.')); });
+    }, []);
+    const wValue = (waiting || []).reduce((t, r) => t + r.value, 0);
+    const wOld = (waiting || []).filter(r => r.age_days > 30).length;
+    const go = (v) => setParams(v === 'waiting' ? { view: 'waiting' } : {});
+    const tabs = waiting === false ? null : (
+        <div className="flex gap-1 mb-3 border-b border-slate-200" role="tablist" aria-label="Supplier invoices">
+            {[['register', 'Invoices', null], ['waiting', 'Waiting for invoice', waiting ? `${waiting.length} GRN${waiting.length === 1 ? '' : 's'} · ₹${inr(wValue)}` : '…']].map(([k, label, extra]) => (
+                <button key={k} type="button" role="tab" aria-selected={view === k} onClick={() => go(k)}
+                    className={`px-3 py-2 text-sm font-semibold border-b-2 -mb-px ${view === k ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>
+                    {label}{extra && <span className={`ml-1.5 text-xs font-normal ${wOld && k === 'waiting' ? 'text-rose-700' : 'text-slate-500'}`}>{extra}{wOld && k === 'waiting' ? ` · ${wOld} over 30 days` : ''}</span>}
+                </button>
+            ))}
+        </div>
+    );
+    if (view === 'waiting' && waiting !== false) {
+        return (
+            <div>
+                <PageHeader title="Supplier invoices" subtitle="Goods received with no supplier invoice yet. Enter each bill from here: the supplier and its GRN lines are filled in."
+                    actions={canEnter ? <PrimaryButton onClick={() => navigate('/v3/purchasing/invoices/new')}><Plus size={14} /> Enter invoice</PrimaryButton> : null} />
+                {tabs}
+                <ErrorBox text={waitErr} />
+                {!waiting ? (waitErr ? null : <Loading />) : <WaitingForInvoice rows={waiting} canEnter={canEnter} />}
+            </div>
+        );
+    }
+    return <InvoiceRegister tabs={tabs} />;
+}
+
+function InvoiceRegister({ tabs }) {
     const navigate = useNavigate();
     const { user } = useAuth();
     const isAdmin = user?.role === 'factory_admin';
@@ -42,7 +84,7 @@ export default function InvoicesPage() {
     const excel = () => {
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet((rows || []).map(r => ({
-            Date: r.invoice_date, Supplier: r.supplier_name, GSTIN: r.supplier_gstin || '', 'Invoice no.': r.invoice_no, HSN: r.hsn_codes || '', GRNs: r.grns || '', 'Taxable (Rs)': r.taxable_amount, 'CGST (Rs)': r.cgst_amount, 'SGST (Rs)': r.sgst_amount, 'IGST (Rs)': r.igst_amount, 'TCS (Rs)': r.tcs_amount, 'Round-off (Rs)': r.round_off_amount,
+            Date: r.invoice_date, Supplier: r.supplier_name, GSTIN: r.supplier_gstin || '', 'Invoice no.': r.invoice_no, HSN: r.hsn_codes || '', POs: (r.pos || []).map(p => p.po_no).join(', '), GRNs: r.grns || '', 'Taxable (Rs)': r.taxable_amount, 'CGST (Rs)': r.cgst_amount, 'SGST (Rs)': r.sgst_amount, 'IGST (Rs)': r.igst_amount, 'TCS (Rs)': r.tcs_amount, 'Round-off (Rs)': r.round_off_amount,
             'Total (Rs)': r.total_amount, Stage: r.status === 'CANCELLED' ? 'Cancelled' : APPROVAL_STATUS[r.approval_status].label, Match: INVOICE_STATUS[r.status].label, Warnings: r.warning_count, 'Entered by': r.created_by_name || '', 'Approved by': r.approved_by_name || '',
         }))), 'Supplier invoices');
         XLSX.writeFile(wb, `supplier-invoices-${todayLocal()}.xlsx`);
@@ -56,8 +98,9 @@ export default function InvoicesPage() {
                     <SecondaryButton onClick={excel} disabled={!rows?.length}><FileSpreadsheet size={14} /> Excel</SecondaryButton>
                     {perms.invoice && <PrimaryButton onClick={() => navigate('/v3/purchasing/invoices/new')}><Plus size={14} /> Enter invoice</PrimaryButton>}
                 </>} />
+            {tabs}
             <div className="flex flex-wrap items-center gap-2 mb-3">
-                <SearchInput value={search} onChange={setSearch} placeholder="Invoice no., supplier" />
+                <SearchInput value={search} onChange={setSearch} placeholder="Invoice no., supplier, PO" />
                 <select className="px-3 py-2 text-sm border border-slate-300 rounded-lg" value={approval} onChange={e => setApproval(e.target.value)} aria-label="Stage">
                     <option value="">All stages</option>{['DRAFT', 'SUBMITTED', 'ON_HOLD', 'APPROVED'].map(k => <option key={k} value={k}>{APPROVAL_STATUS[k].label}</option>)}
                 </select>
@@ -71,17 +114,18 @@ export default function InvoicesPage() {
             <ErrorBox text={error} />
             {!rows ? <Loading /> : (
                 <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto">
-                    <table className="w-full text-sm min-w-[880px]">
+                    <table className="w-full text-sm min-w-[980px]">
                         <thead className="bg-slate-50 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">
-                            <tr><th className="px-3 py-2.5">Invoice</th><th className="px-3 py-2.5">Date</th><th className="px-3 py-2.5">Supplier</th><th className="px-3 py-2.5">GRNs</th><th className="px-3 py-2.5 text-right">Total ₹</th><th className="px-3 py-2.5">Match</th></tr>
+                            <tr><th className="px-3 py-2.5">Invoice</th><th className="px-3 py-2.5">Date</th><th className="px-3 py-2.5">Supplier</th><th className="px-3 py-2.5">PO</th><th className="px-3 py-2.5">GRNs</th><th className="px-3 py-2.5 text-right">Total ₹</th><th className="px-3 py-2.5">Match</th></tr>
                         </thead>
                         <tbody>
-                            {rows.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-400">No supplier invoices.</td></tr>}
+                            {rows.length === 0 && <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400">No supplier invoices.</td></tr>}
                             {rows.map(r => (
                                 <tr key={r.id} className={`border-t border-slate-100 ${r.status === 'CANCELLED' ? 'opacity-60' : ''}`}>
                                     <td className="px-3 py-2.5"><Link to={`/v3/purchasing/invoices/${r.id}`} className="font-semibold text-indigo-700 hover:underline">{r.invoice_no}</Link></td>
                                     <td className="px-3 py-2.5 whitespace-nowrap">{fmtDate(r.invoice_date)}</td>
                                     <td className="px-3 py-2.5">{r.supplier_name}</td>
+                                    <td className="px-3 py-2.5 text-xs">{(r.pos || []).length ? r.pos.map(p => <Link key={p.id} to={`/v3/purchasing/orders/${p.id}`} className="block text-indigo-700 hover:underline whitespace-nowrap">{p.po_no}</Link>) : <span className="text-slate-400">—</span>}</td>
                                     <td className="px-3 py-2.5 text-xs text-slate-600">{r.grns}</td>
                                     <td className="px-3 py-2.5 text-right tabular-nums">{inr(r.total_amount)}</td>
                                     <td className="px-3 py-2.5"><span className={`text-[11px] font-black px-2 py-0.5 rounded border ${APPROVAL_STATUS[r.status === 'CANCELLED' ? 'CANCELLED' : r.approval_status].cls}`}>{APPROVAL_STATUS[r.status === 'CANCELLED' ? 'CANCELLED' : r.approval_status].label}</span>{r.status !== 'CANCELLED' && r.status !== 'NOT_CHECKED' && <span className={`ml-1 text-[11px] font-black px-2 py-0.5 rounded border ${INVOICE_STATUS[r.status].cls}`}>{INVOICE_STATUS[r.status].label}</span>}</td>
@@ -89,7 +133,7 @@ export default function InvoicesPage() {
                             ))}
                             {rows.length > 0 && (
                                 <tr className="border-t-2 border-slate-300 bg-slate-50 font-black text-slate-700">
-                                    <td className="px-3 py-2.5" colSpan={4}>Total · {live.length} invoice(s), not counting drafts and cancelled</td>
+                                    <td className="px-3 py-2.5" colSpan={5}>Total · {live.length} invoice(s), not counting drafts and cancelled</td>
                                     <td className="px-3 py-2.5 text-right tabular-nums">{inr(live.reduce((s, r) => s + r.total_amount, 0))}</td><td />
                                 </tr>
                             )}

@@ -11,7 +11,7 @@ import { PrimaryButton, SecondaryButton, ErrorBox, Loading, Field, inputCls } fr
 import { fmtDate } from '../salesOrders/SalesOrderStatusBadge';
 import { loadLetterhead } from '../components/letterhead';
 import { useWedgeScanner, feedback } from '../production/scanShared';
-import { STATUS, slipRows, unitsText, when, fmtN, tookText, exportIssueSlip, exportPickList, exportRollLabels } from './issuePrint';
+import { STATUS, slipRows, groupByColour, coloursText, unitsText, when, fmtN, tookText, exportIssueSlip, exportPickList, exportRollLabels } from './issuePrint';
 
 const ACTION = { DRAFT: 'Draft made', CHANGED: 'Draft changed', SUBMITTED: 'Submitted to cutting', RECALLED: 'Recalled', CANCELLED: 'Cancelled', RECEIVED: 'Received', REJECTED: 'Every roll refused' };
 
@@ -53,6 +53,14 @@ export default function MaterialIssueSlipPage() {
     };
     const rows = slipRows(s);
     const live = rows.filter(r => r.status !== 'REJECTED');
+    // Fabric slips: rolls by garment colour, with a summary per colour (8 Nov 2026).
+    const groups = isTrim ? null : groupByColour(s, rows);
+    const showState = ['SUBMITTED', 'RECEIVED', 'REJECTED'].includes(s.status);
+    const stateText = (list) => {
+        if (s.status === 'SUBMITTED') { const p = list.filter(r => pending.some(x => x.code === r.code)); const done = p.filter(r => decide[pending.find(x => x.code === r.code).roll_id]?.status).length; return `${done} of ${p.length}`; }
+        const out = list.filter(r => r.status === 'REJECTED').length;
+        return `${list.length - out} received${out ? ` · ${out} refused` : ''}`;
+    };
     const mine = Boolean(perm.issue) && !isTrim;
     const allDecided = pending.length > 0 && pending.every(p => decide[p.roll_id]?.status === 'RECEIVED' || (decide[p.roll_id]?.status === 'REJECTED' && decide[p.roll_id]?.reason?.trim()));
     const anyIn = pending.some(p => decide[p.roll_id]?.status === 'RECEIVED');
@@ -84,17 +92,45 @@ export default function MaterialIssueSlipPage() {
             <ErrorBox text={error} />
             {scanMsg && <p className={`my-2 text-sm font-semibold rounded-lg px-3 py-2 border ${scanMsg.ok ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-rose-50 border-rose-200 text-rose-800'}`}>{scanMsg.text}</p>}
             {canReceive && <div className="flex flex-wrap items-center gap-2 my-2"><p className="text-sm font-semibold text-slate-700">Check each roll: scan its label, or mark it here.</p><SecondaryButton onClick={() => setDecide(Object.fromEntries(pending.map(p => [p.roll_id, { status: 'RECEIVED' }])))}><CheckCheck size={14} /> Mark all received</SecondaryButton></div>}
+            {groups && (
+                <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto mb-3 mt-2">
+                    <p className="px-3 pt-2.5 pb-1 text-xs font-black uppercase tracking-wider text-slate-500">Summary by colour</p>
+                    <table className="w-full text-sm min-w-[720px]">
+                        <thead className="bg-slate-50 text-left text-xs font-bold text-slate-500 uppercase tracking-wider"><tr><th className="px-3 py-2">Colour</th><th className="px-3 py-2">Fabric</th><th className="px-3 py-2">Dye lots</th><th className="px-3 py-2 text-right">Rolls</th><th className="px-3 py-2 text-right">Quantity</th>{showState && <th className="px-3 py-2">{s.status === 'SUBMITTED' ? 'Checked' : 'Received / refused'}</th>}</tr></thead>
+                        <tbody>{groups.map(g => {
+                            const gl = g.rows.filter(r => r.status !== 'REJECTED');
+                            const lots = [...new Set(g.rows.map(r => r.dye_lot || '—'))];
+                            return (
+                                <tr key={g.key} className="border-t border-slate-100">
+                                    <td className="px-3 py-2 font-bold">{coloursText(g)}</td>
+                                    <td className="px-3 py-2 text-xs text-slate-600">{g.label}</td>
+                                    <td className={`px-3 py-2 text-xs ${lots.length > 1 ? 'font-bold text-amber-800' : ''}`}>{lots.join(', ')}</td>
+                                    <td className="px-3 py-2 text-right tabular-nums">{gl.length}</td>
+                                    <td className="px-3 py-2 text-right tabular-nums font-bold whitespace-nowrap">{unitsText(gl)}</td>
+                                    {showState && <td className="px-3 py-2 text-xs">{stateText(g.rows)}</td>}
+                                </tr>
+                            );
+                        })}</tbody>
+                        <tfoot className="bg-slate-50 border-t-2 border-slate-200 font-black"><tr><td className="px-3 py-2" colSpan={2}>Total · {groups.length} colour group{groups.length === 1 ? '' : 's'}</td><td className="px-3 py-2 text-xs">{new Set(rows.map(r => `${r.item_id}|${r.dye_lot || '—'}`)).size} lot(s)</td><td className="px-3 py-2 text-right tabular-nums">{live.length}</td><td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{unitsText(live)}</td>{showState && <td className="px-3 py-2 text-xs">{stateText(rows)}</td>}</tr></tfoot>
+                    </table>
+                </div>
+            )}
             <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto mb-3 mt-2">
                 <table className="w-full text-sm min-w-[720px]">
-                    <thead className="bg-slate-50 text-left text-xs font-bold text-slate-500 uppercase tracking-wider"><tr><th className="px-3 py-2">{isTrim ? 'Item' : 'Fabric'}</th>{!isTrim && <><th className="px-3 py-2">Roll</th><th className="px-3 py-2">Lot</th><th className="px-3 py-2">Location</th></>}<th className="px-3 py-2 text-right">Quantity</th><th className="px-3 py-2">{canReceive ? 'Decision' : 'Status'}</th></tr></thead>
-                    <tbody>
-                        {rows.map((r, i) => {
+                    <thead className="bg-slate-50 text-left text-xs font-bold text-slate-500 uppercase tracking-wider"><tr>{isTrim ? <th className="px-3 py-2">Item</th> : <><th className="px-3 py-2">Roll</th><th className="px-3 py-2">Lot</th><th className="px-3 py-2">Location</th></>}<th className="px-3 py-2 text-right">Quantity</th><th className="px-3 py-2">{canReceive ? 'Decision' : 'Status'}</th></tr></thead>
+                    {(groups || [{ key: 'all', rows }]).map(g => <tbody key={g.key}>
+                        {groups && (
+                            <tr className="border-t-2 border-slate-200 bg-indigo-50/60">
+                                <td className="px-3 py-2" colSpan={5}><b className="text-slate-900">{coloursText(g)}</b><span className="ml-2 text-xs text-slate-600">{g.label}</span></td>
+                            </tr>
+                        )}
+                        {g.rows.map((r, i) => {
                             const p = pending.find(x => x.code === r.code);
                             const dd = p && decide[p.roll_id];
                             return (
                                 <tr key={r.code || i} className={`border-t border-slate-100 ${dd?.status === 'RECEIVED' ? 'bg-emerald-50/50' : dd?.status === 'REJECTED' ? 'bg-rose-50/50' : ''}`}>
-                                    <td className="px-3 py-2">{r.label}</td>
-                                    {!isTrim && <><td className="px-3 py-2 font-semibold">{r.roll_no || '—'}</td><td className="px-3 py-2">{r.dye_lot || <span className="text-amber-700">not recorded</span>}</td><td className="px-3 py-2">{r.location || '—'}</td></>}
+                                    {isTrim ? <td className="px-3 py-2">{r.label}</td>
+                                        : <><td className="px-3 py-2 font-semibold">{r.roll_no || '—'}</td><td className="px-3 py-2">{r.dye_lot || <span className="text-amber-700">not recorded</span>}</td><td className="px-3 py-2">{r.location || '—'}</td></>}
                                     <td className="px-3 py-2 text-right tabular-nums font-bold whitespace-nowrap">{fmtN(r.qty)} {r.uom}{r.returned_qty > 0 && <span className="block text-[11px] font-normal text-slate-500">{fmtN(r.returned_qty)} returned</span>}</td>
                                     <td className="px-3 py-2">
                                         {canReceive && p ? (
@@ -108,8 +144,12 @@ export default function MaterialIssueSlipPage() {
                                 </tr>
                             );
                         })}
-                    </tbody>
-                    <tfoot className="bg-slate-50 border-t-2 border-slate-200 font-black"><tr><td className="px-3 py-2" colSpan={isTrim ? 1 : 4}>Total · {live.length} {isTrim ? 'item' : 'roll'}{live.length === 1 ? '' : 's'}{rows.length > live.length ? ` (${rows.length - live.length} refused, not counted)` : ''}</td><td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{unitsText(live)}</td><td /></tr></tfoot>
+                        {groups && groups.length > 1 && (() => {
+                            const gl = g.rows.filter(r => r.status !== 'REJECTED');
+                            return <tr className="border-t border-slate-200 bg-slate-50/70 text-xs font-bold text-slate-700"><td className="px-3 py-1.5" colSpan={3}>{coloursText(g)} · {gl.length} roll{gl.length === 1 ? '' : 's'}</td><td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">{unitsText(gl)}</td><td /></tr>;
+                        })()}
+                    </tbody>)}
+                    <tfoot className="bg-slate-50 border-t-2 border-slate-200 font-black"><tr><td className="px-3 py-2" colSpan={isTrim ? 1 : 3}>Total · {live.length} {isTrim ? 'item' : 'roll'}{live.length === 1 ? '' : 's'}{rows.length > live.length ? ` (${rows.length - live.length} refused, not counted)` : ''}</td><td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{unitsText(live)}</td><td /></tr></tfoot>
                 </table>
             </div>
             {canReceive && (

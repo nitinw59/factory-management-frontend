@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Navigate, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import ReportProblemButton from './problems/ReportProblem';
-import { ArrowLeftRight, LogOut, ShieldOff, Search, ChevronDown, ChevronRight, ArrowLeft, Menu, X, Eye } from 'lucide-react';
+import { ArrowLeftRight, LogOut, ShieldOff, Search, ChevronDown, ChevronRight, ArrowLeft, Menu, X, Eye, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { accessApi } from './api/accessApi';
 import { workApi } from './api/workApi';
@@ -67,11 +67,13 @@ function SearchBox() {
     );
 }
 
-function TopBar({ me, user, logout, navigate, onMenu, children }) {
+function TopBar({ me, user, logout, navigate, onMenu, navHidden, onToggleNav, children }) {
     const extra = me?.granted_roles?.length ? ` + ${me.granted_roles.map(g => g.label).join(', ')}` : '';
     return (
         <header className="h-14 shrink-0 bg-white border-b border-slate-200 flex items-center gap-3 px-3 md:px-4 sticky top-0 z-20">
             {onMenu && <button type="button" onClick={onMenu} className="md:hidden p-1.5 rounded-lg border border-slate-200 text-slate-600" aria-label="Open the menu"><Menu size={18} /></button>}
+            {/* Hide the menu for more room (20 Nov 2026, owner: "even sidebar menu must hide"); remembered on this device. */}
+            {onToggleNav && <button type="button" onClick={onToggleNav} className="hidden md:inline-flex p-1.5 rounded-lg border border-slate-200 text-slate-600 hover:border-indigo-300 hover:text-indigo-600" aria-label={navHidden ? 'Show the menu' : 'Hide the menu'} title={navHidden ? 'Show the menu' : 'Hide the menu'} aria-pressed={!navHidden}>{navHidden ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}</button>}
             {/* Matrix logo (20 Oct 2026, was a "3.0" badge) — the same logo as the 2.0 portals; back to My work. */}
             <NavLink to="/v3" className="flex items-center gap-2 shrink-0" title="MATRIX — My work">
                 <img src="/matrix_logo.png" alt="MATRIX" className="h-8 w-auto" />
@@ -219,6 +221,8 @@ export default function V3Layout() {
     const [me, setMe] = useState(null);
     const [error, setError] = useState('');
     const [drawer, setDrawer] = useState(false);
+    const [navHidden, setNavHidden] = useState(() => store.get('v3.nav.hidden', false));
+    const toggleNav = () => setNavHidden(h => { store.set('v3.nav.hidden', !h); return !h; });
     const [approvals, setApprovals] = useState(0);
     const load = useCallback(() => accessApi.me().then(res => setMe(res.data)).catch(err => setError(apiError(err, 'Failed to load your 3.0 access.'))), []);
     useEffect(() => { load(); }, [load]);
@@ -260,11 +264,11 @@ export default function V3Layout() {
     return (
         <V3AccessContext.Provider value={ctx}>
             <div className="min-h-screen bg-slate-50 flex flex-col">
-                <TopBar me={me} user={user} logout={logout} navigate={navigate} onMenu={() => setDrawer(true)}>
+                <TopBar me={me} user={user} logout={logout} navigate={navigate} onMenu={() => setDrawer(true)} navHidden={navHidden} onToggleNav={toggleNav}>
                     <SearchBox />
                 </TopBar>
                 <div className="flex-1 flex min-h-0">
-                    <aside className="w-60 shrink-0 bg-white border-r border-slate-200 hidden md:block overflow-y-auto sticky top-14 h-[calc(100vh-3.5rem)]">
+                    <aside className={`w-60 shrink-0 bg-white border-r border-slate-200 hidden ${navHidden ? '' : 'md:block'} overflow-y-auto sticky top-14 h-[calc(100vh-3.5rem)]`}>
                         <Sidebar me={me} approvals={approvals} />
                     </aside>
                     {drawer && (

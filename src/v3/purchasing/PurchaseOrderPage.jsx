@@ -8,7 +8,7 @@
 // or sent back to draft with the approver's reason.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Send, Ban, Pencil, Trash2, Plus, FileDown, FileSpreadsheet, Upload, Info, PackageOpen, PackageX, ShieldCheck, Undo2, PackagePlus } from 'lucide-react';
+import { ArrowLeft, Send, Ban, Pencil, Trash2, Plus, FileDown, FileSpreadsheet, Upload, Info, PackageOpen, PackageX, ShieldCheck, Undo2, PackagePlus, Workflow } from 'lucide-react';
 import Modal from '../../shared/Modal';
 import { purchasingApi } from '../api/purchasingApi';
 import { settingsApi } from '../api/settingsApi';
@@ -167,6 +167,7 @@ export default function PurchaseOrderPage() {
             {po.status === 'CANCELLED' && <div className="mb-3 text-sm bg-slate-50 border border-slate-200 text-slate-700 rounded-lg px-3 py-2"><b>Cancelled</b>{po.cancelled_by_name ? ` by ${po.cancelled_by_name}` : ''}: {po.cancelled_reason}</div>}
             {po.source === 'DIRECT' && <div className="mb-3 text-sm bg-amber-50 border border-amber-200 text-amber-900 rounded-lg px-3 py-2"><b>Direct purchase</b> — made by the store from {po.supplier_reference ? <b>{po.supplier_reference.replace(/^Bill /, 'bill ')}</b> : 'the bill'}{po.shop_name ? <> at <b>{po.shop_name}</b></> : ''}{po.created_by_name ? ` (${po.created_by_name})` : ''}; received on the same goods receipt. Spares / general items only.</div>}
             {po.status === 'SHORT_CLOSED' && <div className="mb-3 text-sm bg-slate-50 border border-slate-200 text-slate-700 rounded-lg px-3 py-2"><b>Short-closed</b> — the rest of this PO is no longer expected.</div>}
+            {po.status === 'RECEIVED' && po.lines.some(l => l.received_qty + 0.0005 < l.qty) && <div className="mb-3 text-sm bg-slate-50 border border-slate-200 text-slate-700 rounded-lg px-3 py-2"><b>Received within the short-delivery tolerance</b> — {po.lines.filter(l => l.received_qty + 0.0005 < l.qty).map(l => `line ${l.line_no}: ${fmt(l.qty - l.received_qty, 'm')} ${l.purchase_uom} short (${Math.round(((l.qty - l.received_qty) / l.qty) * 1000) / 10}%)`).join(', ')}. The balance is no longer expected.</div>}
             {pending && (
                 <div className="mb-3 text-sm bg-rose-50 border border-rose-200 text-rose-900 rounded-lg px-3 py-2">
                     <b>Waiting for factory admin approval</b>{po.approval_requested_by_name ? ` — sent by ${po.approval_requested_by_name}` : ''}{po.approval_requested_at ? ` on ${new Date(po.approval_requested_at).toLocaleString()}` : ''}. {limitNote}. No changes until it is approved or taken back.
@@ -199,6 +200,8 @@ export default function PurchaseOrderPage() {
                 {canManage && po.status === 'PARTLY_RECEIVED' && <SecondaryButton onClick={() => askReason({ title: `Short-close ${po.po_no}`, confirm: 'Short-close', hint: 'The rest is no longer expected from the supplier. Planning stops counting it as incoming; the open requisition quantity can go on a new PO.', run: (r) => purchasingApi.shortClose(id, r) })}><PackageX size={14} /> Short-close</SecondaryButton>}
                 {(editable || (canManage && pending)) && !anyReceived && <SecondaryButton onClick={() => askReason({ title: `Cancel ${po.po_no}`, confirm: 'Cancel purchase order', run: (r) => purchasingApi.cancel(id, r) })}><Ban size={14} /> Cancel</SecondaryButton>}
                 <span className="ml-auto flex gap-2">
+                    {/* The PO's trail: GRNs, invoices and where the goods went, as a map (20 Nov 2026). */}
+                    {po.status !== 'DRAFT' && po.status !== 'PENDING_APPROVAL' && <Link to={`/v3/purchasing/orders/${po.id}/trail`}><SecondaryButton><Workflow size={14} /> Trail</SecondaryButton></Link>}
                     <SecondaryButton onClick={exportPdf}><FileDown size={14} /> PDF</SecondaryButton>
                     <SecondaryButton onClick={exportExcel}><FileSpreadsheet size={14} /> Excel</SecondaryButton>
                 </span>

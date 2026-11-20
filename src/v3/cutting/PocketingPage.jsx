@@ -81,6 +81,112 @@ function printSavedPlan(order, fabrics, sizes, l) {
     return printPlan({ order, layNo: l.lay_no, layer: l.layer_length_in, notes: l.notes, sizes, garments, parts, rows });
 }
 
+// ── Order view pieces (17 Nov 2026, owner: "improve ui and ux with summary information of each table") ──────────────────
+const LAY_STATUS = {
+    CUT: { label: 'Cut', cls: 'border-emerald-300 bg-emerald-50 text-emerald-800' },
+    PLANNED: { label: 'Planned', cls: 'border-amber-300 bg-amber-100 text-amber-900' },
+    CANCELLED: { label: 'Cancelled', cls: 'border-slate-300 bg-slate-50 text-slate-500' },
+};
+const nI = (v) => Number(v || 0).toLocaleString("en-IN");   // piece counts: 12,000
+const sumBy = (list, k) => list.reduce((a, c) => a + (Number(c[k]) || 0), 0);
+// A fabric's pieces over every part × size.
+const fabricTotals = (f) => ({ need: sumBy(f.cells, 'need'), batch_need: sumBy(f.cells, 'batch_need'), cut: sumBy(f.cells, 'cut'), handed: sumBy(f.cells, 'handed'),
+    replaced: sumBy(f.cells, 'replaced'), left: sumBy(f.cells, 'left'), to_cut: sumBy(f.cells, 'to_cut') });
+const shortLabel = (f) => (f.label || '').split(' · ').slice(-1)[0] || f.label;
+const layBySize = (l, sizes) => {
+    const by = new Map();
+    for (const c of l.cells) by.set(c.size_id, (by.get(c.size_id) || 0) + c.pieces);
+    return sizes.filter(s => by.has(s.id)).map(s => `${s.name}: ${by.get(s.id)}`).join(' · ') || 'no pieces';
+};
+
+// Top of the order: one row per pocketing / lining fabric — pieces against the order, metres at cutting, lays. Click to open it.
+function OrderSummary({ d, active, onPick }) {
+    const rows = d.fabrics.map(f => ({ f, t: fabricTotals(f), cut: f.lays.filter(l => l.status === 'CUT').length, planned: f.lays.filter(l => l.status === 'PLANNED').length }));
+    const tot = rows.reduce((a, r) => { for (const k of Object.keys(r.t)) a[k] = (a[k] || 0) + r.t[k]; return a; }, {});
+    const uoms = [...new Set(d.fabrics.map(f => f.uom))];
+    const num = 'px-2 py-2 text-right tabular-nums';
+    return (
+        <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto mb-4">
+            <p className="px-4 pt-3 pb-1 text-xs font-black uppercase tracking-wider text-slate-500">Summary — pieces of every pocket / lining part</p>
+            <table className="w-full text-sm min-w-[820px]">
+                <thead className="bg-slate-50 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">
+                    <tr><th className="px-4 py-2">Fabric</th><th className="px-2 py-2 text-right">Order needs</th><th className="px-2 py-2 text-right" title="What the shell batches already cut need">Batches cut need</th><th className="px-2 py-2 text-right">Cut</th><th className="px-2 py-2 text-right">Handed</th><th className="px-2 py-2 text-right">In stock</th><th className="px-2 py-2 text-right">Still to cut</th><th className="px-2 py-2 text-right">At cutting</th><th className="px-4 py-2 text-right">Lays</th></tr>
+                </thead>
+                <tbody>{rows.map(({ f, t, cut, planned }) => (
+                    <tr key={f.item_id} onClick={() => onPick(f.item_id)} className={`border-t border-slate-100 cursor-pointer hover:bg-indigo-50/40 ${active === f.item_id && d.fabrics.length > 1 ? 'bg-indigo-50/60' : ''}`}>
+                        <td className="px-4 py-2 font-semibold">{f.label}</td>
+                        <td className={num}>{nI(t.need)}</td><td className={num}>{nI(t.batch_need)}</td><td className={num}>{nI(t.cut)}</td><td className={num}>{nI(t.handed)}</td>
+                        <td className={`${num} font-semibold`}>{nI(t.left)}</td>
+                        <td className={`${num} font-bold ${t.to_cut ? 'text-rose-700' : 'text-emerald-700'}`}>{t.to_cut ? nI(t.to_cut) : '✓'}</td>
+                        <td className={`${num} whitespace-nowrap`}>{fmt(f.balance.left)} {f.uom}</td>
+                        <td className="px-4 py-2 text-right text-xs whitespace-nowrap">{cut} cut{planned ? <span className="ml-1 font-bold text-amber-800">· {planned} planned</span> : ''}</td>
+                    </tr>
+                ))}</tbody>
+                {rows.length > 1 && (
+                    <tfoot className="bg-slate-50 border-t-2 border-slate-200 text-xs font-black text-slate-700">
+                        <tr><td className="px-4 py-2">Total · {rows.length} fabrics</td>
+                            {['need', 'batch_need', 'cut', 'handed', 'left'].map(k => <td key={k} className={num}>{nI(tot[k])}</td>)}
+                            <td className={`${num} ${tot.to_cut ? 'text-rose-700' : 'text-emerald-700'}`}>{tot.to_cut ? nI(tot.to_cut) : '✓'}</td>
+                            <td className={`${num} whitespace-nowrap`}>{uoms.length === 1 ? `${fmt(sumBy(d.fabrics.map(f => f.balance), 'left'))} ${uoms[0]}` : '—'}</td>
+                            <td className="px-4 py-2 text-right">{rows.reduce((a, r) => a + r.cut, 0)} cut{rows.some(r => r.planned) ? ` · ${rows.reduce((a, r) => a + r.planned, 0)} planned` : ''}</td></tr>
+                    </tfoot>
+                )}
+            </table>
+        </div>
+    );
+}
+
+// Stock per part × size as a grid: sizes across, figures down, a Total column. Parts with the same figures (front and back
+// pockets, as a rule) share one block — "each".
+function StockGrid({ f, sizes }) {
+    const partIds = [...new Set(f.cells.map(c => c.part_id))];
+    const sig = (pid) => JSON.stringify(f.cells.filter(c => c.part_id === pid).map(c => [c.size_id, c.need, c.batch_need, c.cut, c.handed, c.replaced, c.left, c.to_cut]));
+    const groups = [];
+    for (const pid of partIds) {
+        const g = groups.find(x => x.sig === sig(pid));
+        const name = f.cells.find(c => c.part_id === pid)?.part_name;
+        if (g) g.names.push(name); else groups.push({ sig: sig(pid), pid, names: [name] });
+    }
+    const sizeList = sizes.filter(s => f.cells.some(c => c.size_id === s.id));
+    const rows = [
+        ['need', 'Order needs'], ['batch_need', 'Batches cut need'], ['cut', 'Cut'], ['handed', 'Handed with batches'],
+        ...(f.cells.some(c => c.replaced) ? [['replaced', 'Replaced']] : []), ['left', 'In stock'], ['to_cut', 'Still to cut'],
+    ];
+    if (!f.cells.length) return <p className="text-sm text-slate-400">No pocket / lining parts for this fabric on the order.</p>;
+    return (
+        <div className="overflow-x-auto border border-slate-200 rounded-lg">
+            <table className="w-full text-sm min-w-[640px]">
+                <thead className="bg-slate-50 text-xs font-bold text-slate-500 uppercase tracking-wider"><tr><th className="px-3 py-1.5 text-left">Pieces</th>{sizeList.map(s => <th key={s.id} className="px-2 py-1.5 text-right">{s.name}</th>)}<th className="px-3 py-1.5 text-right">Total</th></tr></thead>
+                {groups.map(g => {
+                    const cellOf = (sid) => f.cells.find(c => c.part_id === g.pid && c.size_id === sid);
+                    return (
+                        <tbody key={g.pid}>
+                            <tr className="border-t-2 border-slate-200 bg-indigo-50/50"><td className="px-3 py-1.5 font-bold text-slate-800" colSpan={sizeList.length + 2}>{g.names.join(' · ')}{g.names.length > 1 && <span className="ml-1 text-xs font-normal text-slate-500">(each — same figures)</span>}</td></tr>
+                            {rows.map(([k, label]) => {
+                                const total = sizeList.reduce((a, s) => a + (cellOf(s.id)?.[k] || 0), 0);
+                                const strong = k === 'left' || k === 'to_cut';
+                                return (
+                                    <tr key={k} className={`border-t border-slate-100 tabular-nums ${k === 'to_cut' ? 'bg-slate-50/60' : ''}`}>
+                                        <td className={`px-3 py-1 text-left whitespace-nowrap ${strong ? 'font-semibold text-slate-800' : 'text-slate-600'}`}>{label}</td>
+                                        {sizeList.map(s => {
+                                            const c = cellOf(s.id);
+                                            const v = c?.[k] || 0;
+                                            if (k === 'to_cut') return <td key={s.id} className={`px-2 py-1 text-right ${v ? 'font-bold text-rose-700' : 'text-emerald-700'}`}>{c ? (v || '✓') : '—'}</td>;
+                                            if (k === 'batch_need' && c?.batches?.length) return <td key={s.id} className="px-2 py-1 text-right"><Why why={c.batches.map(b => `#${b.floor_no}: ${b.garments} garments → ${b.need} needed, ${b.handed} handed${b.finalised ? '' : ' (cutting)'}`).join('\n')}>{v}</Why></td>;
+                                            return <td key={s.id} className={`px-2 py-1 text-right ${strong ? 'font-semibold' : ''} ${!c ? 'text-slate-300' : ''}`}>{c ? nI(v) : '—'}</td>;
+                                        })}
+                                        <td className={`px-3 py-1 text-right font-bold ${k === 'to_cut' ? (total ? 'text-rose-700' : 'text-emerald-700') : ''}`}>{k === 'to_cut' && !total ? '✓' : nI(total)}</td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    );
+                })}
+            </table>
+        </div>
+    );
+}
+
 function OrderList() {
     const [rows, setRows] = useState(null);
     const [error, setError] = useState('');
@@ -297,7 +403,12 @@ function OrderView({ orderId }) {
     const load = useCallback(() => cuttingApi.pocketingOrder(orderId).then(r => { setD(r.data); setError(''); }).catch(err => setError(apiError(err, 'Failed to load.'))), [orderId]);
     useEffect(() => { load(); }, [load]);
     const sizes = useMemo(() => d?.sizes || [], [d]);
+    // One fabric at a time (17 Nov 2026, owner: "so much information in long vertical scroll"): ?fabric= keeps the choice.
+    const [sp, setSp] = useSearchParams();
+    const [showCancelled, setShowCancelled] = useState(false);
     if (!d) return error ? <ErrorBox text={error} /> : <Loading />;
+    const active = d.fabrics.find(f => f.item_id === sp.get('fabric')) || d.fabrics.find(f => fabricTotals(f).to_cut > 0 || f.lays.some(l => l.status === 'PLANNED')) || d.fabrics[0];
+    const pickFabric = (id) => { const n = new URLSearchParams(sp); n.set('fabric', id); setSp(n, { replace: true }); };
     const runAsk = async () => {
         setBusy(true); setFormError('');
         try { const r = await ask.run(vals); if (r) setD(r.data); setAsk(null); } catch (err) { setFormError(apiError(err, 'Failed.')); } finally { setBusy(false); }
@@ -309,11 +420,28 @@ function OrderView({ orderId }) {
             <ErrorBox text={error} />
             {msg && <p className="mb-3 text-sm font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">{msg}</p>}
             {d.fabrics.length === 0 && <p className="text-sm text-slate-500">This order has no pocketing / lining fabric.</p>}
-            {d.fabrics.map(f => {
-                const parts = [...new Set(f.cells.map(c => c.part_id))];
+            {d.fabrics.length > 0 && <OrderSummary d={d} active={active?.item_id} onPick={pickFabric} />}
+            {d.fabrics.length > 1 && (
+                <div className="flex flex-wrap gap-1 mb-0 border-b border-slate-200">
+                    {d.fabrics.map(f => {
+                        const t = fabricTotals(f);
+                        return (
+                            <button key={f.item_id} type="button" onClick={() => pickFabric(f.item_id)}
+                                className={`px-3 py-2 text-sm font-semibold border-b-2 -mb-px ${active?.item_id === f.item_id ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>
+                                {shortLabel(f)} <span className={`ml-1 text-[11px] font-black px-1.5 py-0.5 rounded ${t.to_cut ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'}`}>{t.to_cut ? `${t.to_cut} to cut` : 'complete'}</span>
+                            </button>
+                        );
+                    })}
+                </div>
+            )}
+            {[active].filter(Boolean).map(f => {
+                const lays = f.lays.filter(l => showCancelled || l.status !== 'CANCELLED');
+                const cancelled = f.lays.filter(l => l.status === 'CANCELLED').length;
+                const live = f.lays.filter(l => l.status !== 'CANCELLED');
+                const piecesOf = (l) => l.cells.reduce((a, c) => a + c.pieces, 0);
                 return (
-                    <section key={f.item_id} className="bg-white border border-slate-200 rounded-xl p-4 mb-4">
-                        <div className="flex flex-wrap items-center gap-2 mb-2">
+                    <section key={f.item_id} className={`bg-white border border-slate-200 p-4 mb-4 ${d.fabrics.length > 1 ? 'rounded-b-xl border-t-0' : 'rounded-xl'}`}>
+                        <div className="flex flex-wrap items-center gap-2 mb-3">
                             <h2 className="font-black text-slate-900">{f.label}</h2>
                             <span className="ml-auto flex flex-wrap gap-2">
                                 {perms.cut && <PrimaryButton onClick={() => { setMsg(''); setLay({ fabric: f }); }}><Plus size={14} /> New lay</PrimaryButton>}
@@ -321,32 +449,33 @@ function OrderView({ orderId }) {
                                 {perms.manage && f.balance.left > 0 && <SecondaryButton onClick={() => { setFormError(''); setVals({ metres: String(f.balance.left), reason: '' }); setAsk({ title: `Write off ${f.label}`, hint: `What is left at cutting (${fmt(f.balance.left)} ${f.uom}) and won't be used — it shows on the fabric reconciliation.`, fields: [['metres', `How much (${f.uom})`, 'number'], ['reason', 'Reason', 'text']], run: (v) => cuttingApi.writeOffPocketing(orderId, { fabric_item_id: f.item_id, metres: Number(v.metres), reason: v.reason }) }); }}><Trash2 size={14} /> Write off what is left</SecondaryButton>}
                             </span>
                         </div>
-                        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mb-3 text-sm">
-                            {[['Issued', f.balance.issued], ['Laid', f.balance.laid], ['Waste', f.balance.waste], ['Written off', f.balance.written_off], ['At cutting', f.balance.left], ...(f.balance.on_return > 0 ? [['On a return slip', f.balance.on_return]] : [])].map(([k, v]) => (
-                                <div key={k} className={`rounded-lg border px-3 py-2 ${k === 'At cutting' ? 'border-indigo-200 bg-indigo-50' : 'border-slate-200'}`}><p className="text-xs font-bold text-slate-500">{k}</p><p className="font-black tabular-nums">{fmt(v)} {f.uom}</p></div>
+                        {/* Fabric at cutting, one line */}
+                        <div className="flex flex-wrap gap-x-5 gap-y-1 mb-3 text-sm">
+                            {[['Issued', f.balance.issued], ['Laid', f.balance.laid], ['Waste', f.balance.waste], ['Written off', f.balance.written_off], ...(f.balance.on_return > 0 ? [['On a return slip', f.balance.on_return]] : []), ['At cutting', f.balance.left]].map(([k, v]) => (
+                                <span key={k} className={k === 'At cutting' ? 'font-black text-indigo-800' : 'text-slate-600'}>{k} <b className="tabular-nums">{fmt(v)} {f.uom}</b></span>
                             ))}
                         </div>
-                        <div className="overflow-x-auto border border-slate-200 rounded-lg mb-3">
-                            <table className="w-full text-sm min-w-[560px]">
-                                <thead className="bg-slate-50 text-xs font-bold text-slate-500 uppercase"><tr><th className="px-2 py-1.5 text-left">Part · size</th><th className="px-2 py-1.5 text-right">Order needs</th><th className="px-2 py-1.5 text-right">Cut</th><th className="px-2 py-1.5 text-right">Handed with batches</th><th className="px-2 py-1.5 text-right">Replaced</th><th className="px-2 py-1.5 text-right">In stock</th><th className="px-2 py-1.5 text-right">Still to cut</th></tr></thead>
-                                <tbody>{parts.flatMap(pid => f.cells.filter(c => c.part_id === pid).map(c => (
-                                    <tr key={`${c.part_id}|${c.size_id}`} className="border-t border-slate-100 text-right tabular-nums">
-                                        <td className="px-2 py-1.5 text-left">{c.part_name} · <b>{c.size}</b></td><td className="px-2 py-1.5">{c.need}</td><td className="px-2 py-1.5">{c.cut}</td><td className="px-2 py-1.5">{c.handed}</td>
-                                        <td className="px-2 py-1.5">{c.replaced || '—'}</td><td className="px-2 py-1.5 font-semibold">{c.left}</td><td className={`px-2 py-1.5 ${c.to_cut ? 'text-rose-700 font-bold' : 'text-emerald-700'}`}>{c.to_cut || '✓'}</td>
-                                    </tr>
-                                )))}</tbody>
-                            </table>
+                        <StockGrid f={f} sizes={sizes} />
+                        <div className="flex flex-wrap items-baseline gap-2 mt-4 mb-1">
+                            <p className="text-xs font-black uppercase tracking-wider text-slate-500">Lays</p>
+                            {cancelled > 0 && <button type="button" className="text-xs font-semibold text-indigo-700 hover:underline" onClick={() => setShowCancelled(v => !v)}>{showCancelled ? 'Hide' : 'Show'} {plural(cancelled, 'cancelled lay')}</button>}
                         </div>
-                        <p className="text-xs font-black uppercase tracking-wider text-slate-500 mb-1">Lays</p>
-                        {f.lays.length === 0 ? <p className="text-sm text-slate-400">None yet.</p> : f.lays.map(l => (
-                            <div key={l.id} className={`flex flex-wrap items-center gap-2 py-1.5 border-t border-slate-100 text-sm ${l.status === 'CANCELLED' ? 'opacity-50 line-through' : l.status === 'PLANNED' ? 'bg-amber-50/60 px-1 rounded' : ''}`}>
-                                <b>Lay {l.lay_no}</b>{l.status === 'PLANNED' && <span className="text-[11px] font-black px-1.5 py-0.5 rounded border border-amber-300 bg-amber-100 text-amber-900">Planned, not cut yet</span>}
-                                <span className="text-slate-600">{l.plies} plies × {fmt(l.layer_length_in)} in = {fmt(l.laid)} {f.uom}{l.waste ? ` + ${fmt(l.waste)} waste` : ''}{l.status === 'CUT' && l.planned_plies && l.planned_plies !== l.plies ? ` (planned ${l.planned_plies})` : ''}</span>
-                                {l.stacked_with && <span className="text-[11px] font-bold px-1.5 py-0.5 rounded border border-indigo-200 bg-indigo-50 text-indigo-800">stacked with {l.stacked_with}</span>}
-                                <span className="text-xs text-slate-500">{l.cells.map(c => `${c.part_name} ${c.size} ${c.pieces}`).join(' · ')}</span>
-                                <span className="text-xs text-slate-400">{l.planned_by_name ? `planned by ${l.planned_by_name}` : l.created_by_name}{l.cut_by_name ? ` · cut recorded by ${l.cut_by_name}` : ''} · {new Date(l.cut_at || l.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}{l.notes ? ` · ${l.notes}` : ''}{l.cancel_reason ? ` · cancelled: ${l.cancel_reason}` : ''}</span>
+                        {f.lays.length === 0 ? <p className="text-sm text-slate-400">None yet.</p> : (
+                            <div className="overflow-x-auto border border-slate-200 rounded-lg">
+                                <table className="w-full text-sm min-w-[860px]">
+                                    <thead className="bg-slate-50 text-left text-xs font-bold text-slate-500 uppercase tracking-wider"><tr><th className="px-2 py-1.5">Lay</th><th className="px-2 py-1.5">Status</th><th className="px-2 py-1.5 text-right">Plies</th><th className="px-2 py-1.5 text-right">Layer</th><th className="px-2 py-1.5 text-right">Laid</th><th className="px-2 py-1.5 text-right">Pieces</th><th className="px-2 py-1.5">Who · when</th><th className="px-2 py-1.5" /></tr></thead>
+                                    <tbody>{lays.map(l => (
+                                        <tr key={l.id} className={`border-t border-slate-100 align-top ${l.status === 'CANCELLED' ? 'text-slate-400' : l.status === 'PLANNED' ? 'bg-amber-50/60' : ''}`}>
+                                            <td className="px-2 py-1.5 font-bold whitespace-nowrap">Lay {l.lay_no}{l.stacked_with && <span className="block text-[11px] font-semibold text-indigo-700">+ {l.stacked_with}</span>}</td>
+                                            <td className="px-2 py-1.5"><span className={`text-[11px] font-black px-1.5 py-0.5 rounded border ${LAY_STATUS[l.status]?.cls || ''}`}>{LAY_STATUS[l.status]?.label || l.status}</span>{l.cancel_reason && <span className="block text-[11px] mt-0.5">{l.cancel_reason}</span>}</td>
+                                            <td className="px-2 py-1.5 text-right tabular-nums">{l.plies}{l.status === 'CUT' && l.planned_plies && l.planned_plies !== l.plies ? <span className="block text-[11px] text-slate-500">planned {l.planned_plies}</span> : ''}</td>
+                                            <td className="px-2 py-1.5 text-right tabular-nums">{fmt(l.layer_length_in)} in</td>
+                                            <td className="px-2 py-1.5 text-right tabular-nums whitespace-nowrap">{fmt(l.laid)} {f.uom}{l.waste ? <span className="block text-[11px] text-slate-500">+ {fmt(l.waste)} waste</span> : ''}</td>
+                                            <td className="px-2 py-1.5 text-right tabular-nums"><Why why={layBySize(l, sizes)} className="font-semibold">{nI(piecesOf(l))}</Why></td>
+                                            <td className="px-2 py-1.5 text-xs text-slate-500">{l.planned_by_name ? `planned by ${l.planned_by_name}` : l.created_by_name}{l.cut_by_name ? ` · cut by ${l.cut_by_name}` : ''}<span className="block">{new Date(l.cut_at || l.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}{l.notes ? ` · ${l.notes}` : ''}</span></td>
+                                            <td className="px-2 py-1.5 text-right">
                                 {perms.cut && l.status === 'PLANNED' && (
-                                    <span className="ml-auto flex flex-wrap gap-2">
+                                    <span className="flex flex-wrap justify-end gap-2">
                                         <PrimaryButton onClick={() => { setMsg(''); setLay({ fabric: f, edit: { mode: 'record', layNo: l.lay_no, layId: l.id } }); }}><Scissors size={14} /> Record the cut</PrimaryButton>
                                         <SecondaryButton onClick={() => { setMsg(''); setLay({ fabric: f, edit: { mode: 'change', layNo: l.lay_no, layId: l.id } }); }}><Pencil size={14} /> Change plan</SecondaryButton>
                                         <SecondaryButton onClick={() => printSavedPlan(d.order, d.fabrics, sizes, l)}><Printer size={14} /> Print plan</SecondaryButton>
@@ -354,22 +483,40 @@ function OrderView({ orderId }) {
                                     </span>
                                 )}
                                 {perms.manage && l.status === 'CUT' && (l.cancel_blocked
-                                    ? <span className="ml-auto inline-flex items-center gap-1 text-xs font-bold text-slate-500"><Ban size={12} /> {l.cancel_blocked}</span>
-                                    : <button type="button" className="ml-auto text-xs font-bold text-rose-700 hover:underline" onClick={() => { setFormError(''); setVals({ reason: '' }); setAsk({ title: `Undo lay ${l.lay_no}`, hint: `Its pieces come out of the pocket stock and its metres go back to At cutting. Only if this lay wasn't really cut: if it was, record it again straight away, or the metres will show as fabric that no longer exists. The order's fabric report is marked outdated.${l.stacked_with ? ` The whole lay is undone — ${l.stacked_with} too.` : ''}`, fields: [['reason', 'Reason', 'text']], run: (v) => cuttingApi.cancelLay(l.id, v.reason) }); }}><Ban size={12} className="inline" /> Undo lay</button>)}
+                                    ? <span title={l.cancel_blocked} className="inline-flex items-center gap-1 text-xs font-bold text-slate-400 cursor-help"><Ban size={12} /> Can't undo</span>
+                                    : <button type="button" className="text-xs font-bold text-rose-700 hover:underline" onClick={() => { setFormError(''); setVals({ reason: '' }); setAsk({ title: `Undo lay ${l.lay_no}`, hint: `Its pieces come out of the pocket stock and its metres go back to At cutting. Only if this lay wasn't really cut: if it was, record it again straight away, or the metres will show as fabric that no longer exists. The order's fabric report is marked outdated.${l.stacked_with ? ` The whole lay is undone — ${l.stacked_with} too.` : ''}`, fields: [['reason', 'Reason', 'text']], run: (v) => cuttingApi.cancelLay(l.id, v.reason) }); }}><Ban size={12} className="inline" /> Undo lay</button>)}
+                                            </td>
+                                        </tr>
+                                    ))}</tbody>
+                                    <tfoot className="bg-slate-50 border-t-2 border-slate-200 text-xs font-bold text-slate-700">
+                                        <tr><td className="px-2 py-1.5" colSpan={2}>Total · {plural(live.filter(l => l.status === 'CUT').length, 'lay')} cut{live.some(l => l.status === 'PLANNED') ? `, ${live.filter(l => l.status === 'PLANNED').length} planned` : ''}</td>
+                                            <td className="px-2 py-1.5 text-right tabular-nums">{live.reduce((a, l) => a + l.plies, 0)}</td><td />
+                                            <td className="px-2 py-1.5 text-right tabular-nums whitespace-nowrap">{fmt(live.reduce((a, l) => a + l.laid, 0))} {f.uom}</td>
+                                            <td className="px-2 py-1.5 text-right tabular-nums">{nI(live.reduce((a, l) => a + piecesOf(l), 0))}</td><td colSpan={2} /></tr>
+                                    </tfoot>
+                                </table>
                             </div>
-                        ))}
+                        )}
                         {f.writeoffs.length > 0 && <p className="text-xs text-slate-500 mt-2">Written off: {f.writeoffs.map(w => `${fmt(w.metres)} ${f.uom} (${w.reason})`).join(' · ')}</p>}
                     </section>
                 );
             })}
             {d.batches.length > 0 && (
-                <section className="bg-white border border-slate-200 rounded-xl p-4">
-                    <p className="font-black text-slate-800 mb-2">Shell batches — pieces handed over with each</p>
-                    {d.batches.map(b => (
-                        <Link key={b.id} to={`/v3/cutting/batches/${b.id}`} className="flex items-center gap-3 py-1.5 border-t border-slate-100 first:border-0 text-sm hover:bg-slate-50">
-                            <b>#{b.floor_no}</b><span>{b.batch_code}</span><span className={`ml-auto font-bold ${b.handed < b.need ? 'text-rose-700' : 'text-emerald-700'}`}>{b.handed} / {b.need} handed</span>
-                        </Link>
-                    ))}
+                <section className="bg-white border border-slate-200 rounded-xl overflow-x-auto">
+                    <p className="px-4 pt-3 pb-1 font-black text-slate-800">Shell batches — pieces handed over with each <span className="text-xs font-normal text-slate-500">(finalised batches; a batch still cutting takes its pieces when finalised)</span></p>
+                    <table className="w-full text-sm min-w-[520px]">
+                        <thead className="bg-slate-50 text-left text-xs font-bold text-slate-500 uppercase tracking-wider"><tr><th className="px-4 py-1.5">Batch</th><th className="px-2 py-1.5 text-right">Pieces needed</th><th className="px-2 py-1.5 text-right">Handed</th><th className="px-4 py-1.5 text-right">Short</th></tr></thead>
+                        <tbody>{[...d.batches].sort((a, b) => (a.floor_no || 0) - (b.floor_no || 0)).map(b => (
+                            <tr key={b.id} className="border-t border-slate-100">
+                                <td className="px-4 py-1.5"><Link to={`/v3/cutting/batches/${b.id}`} className="font-semibold text-indigo-700 hover:underline"><b className="text-slate-900">#{b.floor_no}</b> {b.batch_code}</Link></td>
+                                <td className="px-2 py-1.5 text-right tabular-nums">{nI(b.need)}</td><td className="px-2 py-1.5 text-right tabular-nums">{nI(b.handed)}</td>
+                                <td className={`px-4 py-1.5 text-right tabular-nums font-bold ${b.handed < b.need ? 'text-rose-700' : 'text-emerald-700'}`}>{b.handed < b.need ? nI(b.need - b.handed) : '✓'}</td>
+                            </tr>
+                        ))}</tbody>
+                        <tfoot className="bg-slate-50 border-t-2 border-slate-200 text-xs font-bold text-slate-700"><tr><td className="px-4 py-1.5">Total · {d.batches.length} batch{d.batches.length === 1 ? '' : 'es'}</td>
+                            <td className="px-2 py-1.5 text-right tabular-nums">{nI(d.batches.reduce((a, b) => a + b.need, 0))}</td><td className="px-2 py-1.5 text-right tabular-nums">{nI(d.batches.reduce((a, b) => a + b.handed, 0))}</td>
+                            <td className="px-4 py-1.5 text-right tabular-nums">{nI(d.batches.reduce((a, b) => a + Math.max(0, b.need - b.handed), 0)) === '0' ? '✓' : nI(d.batches.reduce((a, b) => a + Math.max(0, b.need - b.handed), 0))}</td></tr></tfoot>
+                    </table>
                 </section>
             )}
             {lay && <LayDialog order={d.order} fabrics={d.fabrics} startId={lay.fabric.item_id} edit={lay.edit} sizes={sizes} suggest={d.suggest} onClose={() => setLay(null)}

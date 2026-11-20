@@ -51,16 +51,15 @@ export const cuttingApi = {
     batchPockets: (batchId) => api.get(`/v3/cutting/batches/${batchId}/pockets`),
     handPockets: (batchId) => api.post(`/v3/cutting/batches/${batchId}/pockets`),
     replacePocket: (batchId, data) => api.post(`/v3/cutting/batches/${batchId}/pockets/replace`, data),
-    // cut order plan (8 Nov 2026): rules, suggested lays, lay → batch; roll grouping by shade / width
+    // cut plan (rebuilt 8 Nov 2026): the planner's markers (size ratio; length worked out) and rolls, lay → batch; roll grouping
     plan: (lineId) => api.get(`/v3/cutting/plans/${lineId}`),
-    savePlan: (lineId, data) => api.put(`/v3/cutting/plans/${lineId}`, data),   // { allowance_pct?, rules?, notes? }
-    suggestPlan: (lineId) => api.post(`/v3/cutting/plans/${lineId}/suggest`),
-    addPlanLay: (lineId, data) => api.post(`/v3/cutting/plans/${lineId}/lays`, data),
-    updatePlanLay: (layId, data) => api.put(`/v3/cutting/plan-lays/${layId}`, data),   // { ratios, marker_length_in, rolls: [{ key, garment_colour_id, planned_plies }], notes }
+    savePlan: (lineId, data) => api.put(`/v3/cutting/plans/${lineId}`, data),   // { allowance_pct?, notes? }
+    addPlanLay: (lineId, data) => api.post(`/v3/cutting/plans/${lineId}/lays`, data),   // { ratios: [{ size_id, ratio }], rolls: [{ key, garment_colour_id, planned_plies? }], notes }
+    resetPlan: (lineId) => api.post(`/v3/cutting/plans/${lineId}/reset`),   // lays not yet batches removed, allowance back to the order's
+    updatePlanLay: (layId, data) => api.put(`/v3/cutting/plan-lays/${layId}`, data),
     removePlanLay: (layId) => api.delete(`/v3/cutting/plan-lays/${layId}`),
     batchFromLay: (layId, data) => api.post(`/v3/cutting/plan-lays/${layId}/batch`, data),   // { numbering_mode }
-    planSettings: () => api.get('/v3/cutting/plan-settings'),
-    savePlanSettings: (data) => api.put('/v3/cutting/plan-settings', data),   // { rules, plan_mandatory? }
+    planSettings: () => api.get('/v3/cutting/plan-settings'),   // { rules: { width_tol_cm } } for Group rolls
     rollGroups: (orderId) => api.get(`/v3/cutting/roll-groups/${orderId}`),
     saveRollGroups: (orderId, rolls) => api.put(`/v3/cutting/roll-groups/${orderId}`, { rolls }),
     // over-cut above the free limit (20 Oct 2026)

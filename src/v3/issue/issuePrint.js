@@ -31,11 +31,24 @@ export const tookText = (from, to) => {
 
 // A slip's rolls: what is planned until cutting decides, then what it decided; older and trim slips from their lines.
 export const slipRows = (s) => {
-    if (s.planned?.length) return s.planned.map(p => ({ label: p.label, roll_no: p.roll_no, code: p.code, dye_lot: p.dye_lot, width: p.width, width_unit: p.width_unit, location: p.location, qty: p.qty, uom: p.uom, status: p.status, reason: p.reason }));
+    if (s.planned?.length) return s.planned.map(p => ({ item_id: p.item_id, label: p.label, roll_no: p.roll_no, code: p.code, dye_lot: p.dye_lot, width: p.width, width_unit: p.width_unit, location: p.location, qty: p.qty, uom: p.uom, status: p.status, reason: p.reason }));
     return (s.lines || []).flatMap(l => (l.rolls?.length
-        ? l.rolls.map(r => ({ label: l.label, roll_no: r.roll_no, code: `R${r.roll_id}`, dye_lot: r.dye_lot, qty: r.qty, uom: l.uom, returned_qty: r.returned_qty, status: 'RECEIVED' }))
-        : [{ label: l.label, qty: l.qty, uom: l.uom, returned_qty: l.returned_qty, status: 'RECEIVED' }]));
+        ? l.rolls.map(r => ({ item_id: l.item_id, label: l.label, roll_no: r.roll_no, code: `R${r.roll_id}`, dye_lot: r.dye_lot, qty: r.qty, uom: l.uom, returned_qty: r.returned_qty, status: 'RECEIVED' }))
+        : [{ item_id: l.item_id, label: l.label, qty: l.qty, uom: l.uom, returned_qty: l.returned_qty, status: 'RECEIVED' }]));
 };
+// A fabric slip's rows by fabric, named by the garment colours it cuts on the order (8 Nov 2026, owner: "group rolls by
+// color and summary"): one colour's shell first by colour name; a fabric that serves several colours (pocketing) last.
+export const groupByColour = (s, rows) => {
+    const m = new Map();
+    for (const r of rows) {
+        const k = r.item_id || r.label;
+        if (!m.has(k)) m.set(k, { key: k, label: r.label, colours: s.item_colours?.[r.item_id] || [], rows: [] });
+        m.get(k).rows.push(r);
+    }
+    const name = (g) => (g.colours.length === 1 ? g.colours[0] : g.label);
+    return [...m.values()].sort((a, b) => (a.colours.length > 1) - (b.colours.length > 1) || name(a).localeCompare(name(b), undefined, { numeric: true }));
+};
+export const coloursText = (g) => (!g.colours.length ? '—' : g.colours.length <= 3 ? g.colours.join(', ') : `${g.colours.length} colours`);
 const STATE = { PENDING: 'Waiting', RECEIVED: 'Received', REJECTED: 'Refused' };
 const fileNo = (s) => s.issue_no.replace(/[^\w-]+/g, '-');
 
@@ -74,13 +87,44 @@ export function exportIssueSlip(s, lh) {
     for (const l of lines) for (const part of doc.splitTextToSize(l, W - 16)) { doc.text(part, 8, y); y += 4.2; }
     const rows = slipRows(s);
     const right = { halign: 'right' };
-    autoTable(doc, {
-        ...TABLE, startY: y + 1,
-        head: [['#', trim ? 'Item' : 'Fabric', 'Roll', 'Lot', { content: 'Qty', styles: right }, 'Status']],
-        body: rows.map((r, i) => [i + 1, r.label, r.roll_no || '—', r.dye_lot || '—', `${fmtN(r.qty)} ${r.uom}`, `${STATE[r.status] || r.status}${r.reason ? `: ${r.reason}` : ''}${r.returned_qty ? ` · ${fmtN(r.returned_qty)} returned` : ''}`]),
-        foot: [[{ content: `Total · ${rows.length} line${rows.length === 1 ? '' : 's'}`, colSpan: 4 }, { content: unitsText(rows.filter(r => r.status !== 'REJECTED')), styles: right }, '']],
-        columnStyles: { 0: { cellWidth: 8 }, 4: right },
-    });
+    const stateOf = (r) => `${STATE[r.status] || r.status}${r.reason ? `: ${r.reason}` : ''}${r.returned_qty ? ` · ${fmtN(r.returned_qty)} returned` : ''}`;
+    const live = (list) => list.filter(r => r.status !== 'REJECTED');
+    if (trim) {
+        autoTable(doc, {
+            ...TABLE, startY: y + 1,
+            head: [['#', 'Item', 'Roll', 'Lot', { content: 'Qty', styles: right }, 'Status']],
+            body: rows.map((r, i) => [i + 1, r.label, r.roll_no || '—', r.dye_lot || '—', `${fmtN(r.qty)} ${r.uom}`, stateOf(r)]),
+            foot: [[{ content: `Total · ${rows.length} line${rows.length === 1 ? '' : 's'}`, colSpan: 4 }, { content: unitsText(live(rows)), styles: right }, '']],
+            columnStyles: { 0: { cellWidth: 8 }, 4: right },
+        });
+    } else {
+        // Fabric (8 Nov 2026, as the slip page): a summary per garment colour, then the rolls under each colour with a subtotal.
+        const groups = groupByColour(s, rows);
+        const stateText = (list) => { const out = list.filter(r => r.status === 'REJECTED').length; return s.status === 'RECEIVED' || s.status === 'REJECTED' ? `${list.length - out} received${out ? ` · ${out} refused` : ''}` : `${list.length} ${s.status === 'SUBMITTED' ? 'waiting' : 'planned'}`; };
+        doc.setFont(undefined, 'bold'); doc.text('Summary by colour', 8, y + 3); doc.setFont(undefined, 'normal');
+        autoTable(doc, {
+            ...TABLE, startY: y + 5,
+            head: [['Colour', 'Fabric', 'Dye lots', { content: 'Rolls', styles: right }, { content: 'Qty', styles: right }, 'Status']],
+            body: groups.map(g => [coloursText(g), g.label, [...new Set(g.rows.map(r => r.dye_lot || '—'))].join(', '), live(g.rows).length, unitsText(live(g.rows)), stateText(g.rows)]),
+            foot: [[{ content: `Total · ${groups.length} colour group${groups.length === 1 ? '' : 's'}`, colSpan: 2 }, `${new Set(rows.map(r => `${r.item_id}|${r.dye_lot || '—'}`)).size} lot(s)`,
+                { content: live(rows).length, styles: right }, { content: unitsText(live(rows)), styles: right }, stateText(rows)]],
+            columnStyles: { 0: { fontStyle: 'bold' }, 3: right, 4: right },
+        });
+        let n = 0;
+        const body = [];
+        for (const g of groups) {
+            body.push([{ content: `${coloursText(g)}   ${g.label}`, colSpan: 5, styles: { fontStyle: 'bold', fillColor: [238, 242, 255] } }]);
+            for (const r of g.rows) body.push([++n, r.roll_no || '—', r.dye_lot || '—', { content: `${fmtN(r.qty)} ${r.uom}`, styles: right }, stateOf(r)]);
+            if (groups.length > 1) body.push([{ content: `${coloursText(g)} · ${live(g.rows).length} roll${live(g.rows).length === 1 ? '' : 's'}`, colSpan: 3, styles: { fontStyle: 'bold', textColor: 80 } }, { content: unitsText(live(g.rows)), styles: { ...right, fontStyle: 'bold', textColor: 80 } }, '']);
+        }
+        autoTable(doc, {
+            ...TABLE, startY: doc.lastAutoTable.finalY + 5,
+            head: [['#', 'Roll', 'Lot', { content: 'Qty', styles: right }, 'Status']],
+            body,
+            foot: [[{ content: `Total · ${live(rows).length} roll${live(rows).length === 1 ? '' : 's'}${rows.length > live(rows).length ? ` (${rows.length - live(rows).length} refused, not counted)` : ''}`, colSpan: 3 }, { content: unitsText(live(rows)), styles: right }, '']],
+            columnStyles: { 0: { cellWidth: 8 } },
+        });
+    }
     const by = doc.lastAutoTable.finalY + 24;
     doc.setFontSize(9); doc.setDrawColor(120);
     [['Issued by', 8], ['Received by', W / 2 + 4]].forEach(([t, x]) => { doc.line(x, by, x + W / 2 - 16, by); doc.text(t, x, by + 4); });
