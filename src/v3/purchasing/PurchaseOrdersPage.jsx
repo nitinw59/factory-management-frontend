@@ -4,6 +4,8 @@
 // due and days late, value still to bill, status and the next step. Filters (supplier, kind, how it was made), sort, group by
 // supplier with subtotals, a totals row, Excel of what is shown. The status / sent back / source / since links from My work
 // still work. "New purchase order" works from approved requisition lines.
+// The trim store reads this list too (22 Nov 2026), without prices: no value, received-by-value, to-bill columns, money in the
+// tabs, To bill tab or money sorts; the server leaves those fields out.
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import * as XLSX from 'xlsx';
@@ -13,6 +15,7 @@ import { apiError } from '../api/mastersApi';
 import { ErrorBox, Loading, useRowLink } from '../components/ui';
 import { fmtDate, todayLocal } from '../salesOrders/SalesOrderStatusBadge';
 import { PO_STATUS, inr } from './poShared';
+import { useSeesPrices } from '../V3Access';
 
 const GROUP_KEY = 'v3.poListGroup';
 const OPEN = ['ISSUED', 'PARTLY_RECEIVED'];
@@ -26,8 +29,9 @@ function enrich(r, today) {
     const due = r.delivery_date || r.first_delivery || null;
     const open = OPEN.includes(r.status);
     const late = open && due && due < today ? daysBetween(due, today) : 0;
-    const toCome = open ? Math.max(0, Math.round((r.total - r.received_value) * 100) / 100) : 0;
-    const pct = r.total > 0 ? Math.min(100, Math.round((r.received_value / r.total) * 100)) : 0;
+    const total = r.total || 0, received = r.received_value || 0;   // no values for the stores
+    const toCome = open ? Math.max(0, Math.round((total - received) * 100) / 100) : 0;
+    const pct = total > 0 ? Math.min(100, Math.round((received / total) * 100)) : 0;
     const tab = ['DRAFT', 'PENDING_APPROVAL'].includes(r.status) ? 'issue' : late ? 'late' : r.status === 'ISSUED' ? 'awaiting' : r.status === 'PARTLY_RECEIVED' ? 'partly' : 'closed';
     return { ...r, due, late, toCome, pct, tab, next: computeNext(r, today) };
 }
@@ -52,10 +56,11 @@ const sorter = {
     to_come: (a, b) => b.toCome - a.toCome,
     to_bill: (a, b) => b.to_bill_value - a.to_bill_value,
 };
-const sums = (list) => ({ n: list.length, total: list.reduce((s, r) => s + r.total, 0), received: list.reduce((s, r) => s + r.received_value, 0), toCome: list.reduce((s, r) => s + r.toCome, 0), toBill: list.reduce((s, r) => s + (r.status === 'CANCELLED' ? 0 : r.to_bill_value), 0), late: list.filter(r => r.late).length });
+const sums = (list) => ({ n: list.length, total: list.reduce((s, r) => s + (r.total || 0), 0), received: list.reduce((s, r) => s + (r.received_value || 0), 0), toCome: list.reduce((s, r) => s + r.toCome, 0), toBill: list.reduce((s, r) => s + (r.status === 'CANCELLED' ? 0 : r.to_bill_value || 0), 0), late: list.filter(r => r.late).length });
 
 export default function PurchaseOrdersPage() {
     const rowLink = useRowLink();   // the whole row opens the record
+    const prices = useSeesPrices();
     const [params, setParams] = useSearchParams();
     const status = params.get('status') || '';
     const sentBack = params.get('sent_back') === '1';   // My work: "Purchase orders sent back"
@@ -64,7 +69,7 @@ export default function PurchaseOrdersPage() {
     const tab = params.get('tab') || (status || sentBack || since ? 'all' : 'open');
     const supplier = params.get('supplier') || '';
     const kind = params.get('kind') || '';
-    const sort = params.get('sort') || 'new';
+    const sort = prices || ['new', 'due', 'late'].includes(params.get('sort')) ? params.get('sort') || 'new' : 'new';
     const [rows, setRows] = useState(null);
     const [search, setSearch] = useState('');
     const [group, setGroup] = useState(readGroup);
@@ -84,15 +89,16 @@ export default function PurchaseOrdersPage() {
     const all = useMemo(() => (rows || []).map(r => enrich(r, today)), [rows, today]);
     const suppliers = useMemo(() => [...new Map(all.map(r => [r.supplier_id, r.supplier_name])).entries()].sort((a, b) => a[1].localeCompare(b[1])), [all]);
     const filtered = all.filter(r => (!supplier || r.supplier_id === supplier) && (!kind || (r.kinds || []).includes(kind)));
-    const counts = Object.fromEntries(TABS.map(([k, , f]) => { const l = filtered.filter(f); return [k, { n: l.length, total: l.reduce((s, r) => s + r.total, 0), toCome: l.reduce((s, r) => s + r.toCome, 0), toBill: l.reduce((s, r) => s + r.to_bill_value, 0) }]; }));
-    const pick = (TABS.find(([k]) => k === tab) || TABS[0])[2];
+    const counts = Object.fromEntries(TABS.map(([k, , f]) => { const l = filtered.filter(f); const t = sums(l); return [k, { n: l.length, total: t.total, toCome: t.toCome, toBill: t.toBill }]; }));
+    const tabs = TABS.filter(([k]) => prices || k !== 'bill');
+    const pick = (tabs.find(([k]) => k === tab) || tabs[0])[2];
     const shown = filtered.filter(pick);
     if (sorter[sort]) shown.sort(sorter[sort]);
     const groups = useMemo(() => {
         if (!group) return null;
         const m = new Map();
         for (const r of shown) { if (!m.has(r.supplier_id)) m.set(r.supplier_id, { id: r.supplier_id, name: r.supplier_name, rows: [] }); m.get(r.supplier_id).rows.push(r); }
-        return [...m.values()].map(g => ({ ...g, sum: sums(g.rows) })).sort((a, b) => b.sum.toCome - a.sum.toCome || b.sum.total - a.sum.total);
+        return [...m.values()].map(g => ({ ...g, sum: sums(g.rows) })).sort((a, b) => b.sum.toCome - a.sum.toCome || b.sum.total - a.sum.total || b.sum.n - a.sum.n);
     }, [group, shown]);
     const tot = sums(shown);
     const flipGroup = () => setGroup(g => { try { localStorage.setItem(GROUP_KEY, g ? '0' : '1'); } catch { /* per-device convenience only */ } return !g; });
@@ -101,8 +107,10 @@ export default function PurchaseOrdersPage() {
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(shown.map(r => ({
             PO: r.po_no, Date: r.po_date, Supplier: r.supplier_name, Shop: r.shop_name || '', Kinds: (r.kinds || []).map(k => KIND[k]?.label || k).join(', '), 'Made by': r.source === 'DIRECT' ? 'Direct purchase' : 'Purchasing',
-            'Sales orders': (r.orders || []).map(o => o.order_no).join(', '), Lines: r.line_count, 'Ordered incl. GST (Rs)': r.total, 'Received incl. GST (Rs)': r.received_value, 'Received %': r.pct,
-            'Still to come (Rs)': r.toCome, Due: r.due || '', 'Days late': r.late || '', 'Last receipt': r.last_receipt || '', 'Billed before GST (Rs)': r.billed_value, 'To bill before GST (Rs)': r.status === 'CANCELLED' ? 0 : r.to_bill_value,
+            'Sales orders': (r.orders || []).map(o => o.order_no).join(', '), Lines: r.line_count,
+            ...(prices ? { 'Ordered incl. GST (Rs)': r.total, 'Received incl. GST (Rs)': r.received_value, 'Received %': r.pct, 'Still to come (Rs)': r.toCome } : {}),
+            Due: r.due || '', 'Days late': r.late || '', 'Last receipt': r.last_receipt || '',
+            ...(prices ? { 'Billed before GST (Rs)': r.billed_value, 'To bill before GST (Rs)': r.status === 'CANCELLED' ? 0 : r.to_bill_value } : {}),
             Status: PO_STATUS[r.status]?.label || r.status, 'Next step': r.next ? `${r.next.t}${r.next.also ? ` · ${r.next.also}` : ''}` : '', Stale: r.stale ? 'yes' : '',
         }))), 'Purchase orders');
         XLSX.writeFile(wb, `purchase-orders-${tab}-${today}.xlsx`);
@@ -119,16 +127,16 @@ export default function PurchaseOrdersPage() {
                         {r.unrequisitioned && <span className="text-[10px] font-bold px-1.5 rounded border bg-amber-50 text-amber-800 border-amber-200" title="Has quantity with no requisition (advance buy, MOQ, store stock…): the reason is on the PO">no req.</span>}</span></td>
                 <td className="px-3 py-2 text-slate-700">{group ? null : r.supplier_name}{r.shop_name && <span className="block text-xs text-slate-500">{r.shop_name}</span>}</td>
                 <td className="px-3 py-2 text-xs">{(r.orders || []).length ? <span className="flex flex-wrap gap-x-1.5">{r.orders.slice(0, 3).map(o => <Link key={o.id} to={`/v3/sales-orders/${o.id}`} onClick={e => e.stopPropagation()} className="text-indigo-700 hover:underline whitespace-nowrap">{o.order_no.replace(/^SO3\/\d{4}-\d{2}\//, 'SO ')}</Link>)}{r.orders.length > 3 && <span className="text-slate-500" title={r.orders.slice(3).map(o => o.order_no).join(', ')}>+{r.orders.length - 3}</span>}</span> : <span className="text-slate-400">{r.source === 'DIRECT' ? 'store' : '—'}</span>}</td>
-                <td className="px-3 py-2 text-right tabular-nums font-semibold">{inr(r.total)}</td>
+                {prices && <><td className="px-3 py-2 text-right tabular-nums font-semibold">{inr(r.total)}</td>
                 <td className="px-3 py-2 min-w-[130px]" title={r.last_receipt ? `Last goods in ${fmtDate(r.last_receipt)}` : undefined}>{r.status === 'CANCELLED' || ['DRAFT', 'PENDING_APPROVAL'].includes(r.status) ? <span className="text-slate-400 text-xs">—</span> : <>
                     <span className="flex items-center gap-2"><span className="flex-1 h-1.5 rounded bg-slate-200 overflow-hidden"><span className={`block h-full ${r.pct >= 100 ? 'bg-emerald-500' : 'bg-amber-500'}`} style={{ width: `${r.pct}%` }} /></span><span className="text-xs tabular-nums font-semibold w-9 text-right">{r.pct}%</span></span>
                     {r.toCome > 0.5 && <span className="block text-[11px] text-slate-500 tabular-nums">₹{inr(r.toCome)} to come</span>}
-</>}</td>
+</>}</td></>}
                 <td className="px-3 py-2 whitespace-nowrap">{r.due ? fmtDate(r.due) : '—'}
                     {r.late > 0 && <span className="block text-[11px] font-bold text-rose-700">{r.late} day{r.late === 1 ? '' : 's'} late</span>}
                     {!r.late && OPEN.includes(r.status) && r.due && <span className="block text-[11px] text-slate-500">{daysBetween(today, r.due) === 0 ? 'due today' : `in ${daysBetween(today, r.due)} days`}</span>}</td>
-                <td className="px-3 py-2 text-right tabular-nums">{r.status !== 'CANCELLED' && r.to_bill_value > 0.5 ? <span className="font-semibold text-amber-800">{inr(r.to_bill_value)}</span> : <span className="text-slate-400">—</span>}
-                    {r.billed_value > 0.5 && <span className="block text-[11px] text-slate-500">billed {inr(r.billed_value)}</span>}</td>
+                {prices && <td className="px-3 py-2 text-right tabular-nums">{r.status !== 'CANCELLED' && r.to_bill_value > 0.5 ? <span className="font-semibold text-amber-800">{inr(r.to_bill_value)}</span> : <span className="text-slate-400">—</span>}
+                    {r.billed_value > 0.5 && <span className="block text-[11px] text-slate-500">billed {inr(r.billed_value)}</span>}</td>}
                 <td className="px-3 py-2"><span className={`text-[11px] font-black px-2 py-0.5 rounded border ${PO_STATUS[r.status].cls}`}>{PO_STATUS[r.status].label}</span>
                     {r.sent_back && <span className="ml-1 text-[11px] font-bold text-rose-700">sent back</span>}
                     {n && <span className={`block mt-1 text-[11px] font-semibold ${TONE[n.tone]}`}>→ {n.t}{n.also ? <span className="font-normal text-amber-800"> · {n.also}</span> : null}</span>}
@@ -136,13 +144,16 @@ export default function PurchaseOrdersPage() {
             </tr>
         );
     };
-    const totalCells = (s) => <>
+    const totalCells = (s) => (!prices ? <>
+        <td className="px-3 py-2 text-xs">{s.late ? <span className="text-rose-700">{s.late} late</span> : ''}</td>
+        <td />
+    </> : <>
         <td className="px-3 py-2 text-right tabular-nums">{inr(s.total)}</td>
         <td className="px-3 py-2 text-xs tabular-nums">{s.total > 0 ? `${Math.min(100, Math.round((s.received / s.total) * 100))}% received` : ''}{s.toCome > 0.5 && <span className="block">₹{inr(s.toCome)} to come</span>}</td>
         <td className="px-3 py-2 text-xs">{s.late ? <span className="text-rose-700">{s.late} late</span> : ''}</td>
         <td className="px-3 py-2 text-right tabular-nums">{s.toBill > 0.5 ? inr(s.toBill) : '—'}</td>
         <td />
-    </>;
+    </>);
 
     return (
         <div>
@@ -163,7 +174,7 @@ export default function PurchaseOrdersPage() {
                     <option value="">Purchasing + direct</option><option value="STANDARD">Made by purchasing</option><option value="DIRECT">Direct purchases</option>
                 </select>
                 <select className="px-2 py-1.5 text-xs border border-slate-300 rounded-lg bg-white" value={sort} onChange={e => setParam('sort', e.target.value === 'new' ? '' : e.target.value)} aria-label="Sort">
-                    {Object.entries(SORTS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                    {Object.entries(SORTS).filter(([k]) => prices || ['new', 'due', 'late'].includes(k)).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                 </select>
                 <label className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 cursor-pointer select-none"><input type="checkbox" checked={group} onChange={flipGroup} /> By supplier</label>
                 <span className="ml-auto flex items-center gap-2">
@@ -177,26 +188,26 @@ export default function PurchaseOrdersPage() {
                 <button type="button" className="underline font-semibold" onClick={() => { const n = Object.fromEntries(params); delete n.since; delete n.status; delete n.sent_back; delete n.tab; setParams(n); }}>Show all</button></p>}
             {!rows ? <Loading /> : <>
                 <div className="flex flex-wrap gap-1 mb-2" role="tablist" aria-label="Purchase orders by stage">
-                    {TABS.filter(([k]) => k !== 'stale' || counts.stale.n > 0).map(([k, label]) => {
+                    {tabs.filter(([k]) => k !== 'stale' || counts.stale.n > 0).map(([k, label]) => {
                         const c = counts[k]; const on = tab === k;
                         const money = k === 'bill' ? c.toBill : ['late', 'awaiting', 'partly', 'stale'].includes(k) ? c.toCome : c.total;
                         return (
                             <button key={k} type="button" role="tab" aria-selected={on} onClick={() => setParam('tab', k === 'open' && !status && !sentBack && !since ? '' : k)}
-                                title={c.n ? `${lakh(money)}${k === 'bill' ? ' to bill (before GST)' : ['late', 'awaiting', 'partly', 'stale'].includes(k) ? ' still to come' : ' ordered'}` : undefined}
+                                title={c.n && prices ? `${lakh(money)}${k === 'bill' ? ' to bill (before GST)' : ['late', 'awaiting', 'partly', 'stale'].includes(k) ? ' still to come' : ' ordered'}` : undefined}
                                 className={`px-2.5 py-1 rounded-full border text-xs whitespace-nowrap ${on ? 'bg-indigo-600 border-indigo-600 text-white' : k === 'late' || k === 'stale' ? 'bg-white border-rose-200 text-rose-800 hover:bg-rose-50' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}>
-                                <span className="font-bold">{label}</span> <span className="tabular-nums">{c.n}</span>{c.n ? <span className={`tabular-nums ${on ? 'text-indigo-100' : 'text-slate-500'}`}> · {lakh(money)}</span> : null}
+                                <span className="font-bold">{label}</span> <span className="tabular-nums">{c.n}</span>{c.n && prices ? <span className={`tabular-nums ${on ? 'text-indigo-100' : 'text-slate-500'}`}> · {lakh(money)}</span> : null}
                             </button>
                         );
                     })}
                 </div>
                 {tab === 'stale' && <p className="mb-2 text-xs bg-rose-50 border border-rose-200 text-rose-900 rounded-lg px-3 py-2">Issued more than 30 days ago and nothing received. For each: chase the supplier, cancel it, or, if the goods already came in another way (2.0 or a direct purchase), find that receipt before cancelling.</p>}
                 <div className="bg-white border border-slate-200 rounded-xl overflow-auto max-h-[calc(100vh-11.5rem)]">
-                    <table className="w-full text-sm min-w-[1120px]">
+                    <table className={`w-full text-sm ${prices ? 'min-w-[1120px]' : 'min-w-[760px]'}`}>
                         <thead className="bg-slate-50 text-left text-xs font-bold text-slate-500 uppercase tracking-wider sticky top-0 z-10 shadow-[0_1px_0_0_#e2e8f0]">
-                            <tr><th className="px-3 py-2">PO</th><th className="px-3 py-2">Supplier</th><th className="px-3 py-2">For orders</th><th className="px-3 py-2 text-right">Ordered ₹ <span className="normal-case font-normal">(with GST)</span></th><th className="px-3 py-2">Received</th><th className="px-3 py-2">Due</th><th className="px-3 py-2 text-right" title="Received, accepted and not yet on a live supplier invoice, at the rate frozen at receipt">To bill ₹ <span className="normal-case font-normal">(before GST)</span></th><th className="px-3 py-2">Status · next step</th></tr>
+                            <tr><th className="px-3 py-2">PO</th><th className="px-3 py-2">Supplier</th><th className="px-3 py-2">For orders</th>{prices && <><th className="px-3 py-2 text-right">Ordered ₹ <span className="normal-case font-normal">(with GST)</span></th><th className="px-3 py-2">Received</th></>}<th className="px-3 py-2">Due</th>{prices && <th className="px-3 py-2 text-right" title="Received, accepted and not yet on a live supplier invoice, at the rate frozen at receipt">To bill ₹ <span className="normal-case font-normal">(before GST)</span></th>}<th className="px-3 py-2">Status · next step</th></tr>
                         </thead>
                         <tbody>
-                            {shown.length === 0 && <tr><td colSpan={8} className="px-4 py-8 text-center text-slate-400">No purchase orders here{search || supplier || kind ? ' that match' : ''}.</td></tr>}
+                            {shown.length === 0 && <tr><td colSpan={prices ? 8 : 5} className="px-4 py-8 text-center text-slate-400">No purchase orders here{search || supplier || kind ? ' that match' : ''}.</td></tr>}
                             {groups ? groups.flatMap(g => [
                                 <tr key={`g${g.id}`} className="border-t-2 border-slate-200 bg-slate-50 cursor-pointer" onClick={() => setShut(s => ({ ...s, [g.id]: !s[g.id] }))}>
                                     <td className="px-3 py-2 font-bold text-slate-800" colSpan={3}><span className="inline-flex items-center gap-1">{shut[g.id] ? <ChevronRight size={14} /> : <ChevronDown size={14} />}{g.name}</span> <span className="font-normal text-xs text-slate-500">· {g.sum.n} PO{g.sum.n === 1 ? '' : 's'}</span></td>

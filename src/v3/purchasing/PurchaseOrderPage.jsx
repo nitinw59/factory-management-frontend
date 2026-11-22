@@ -6,6 +6,8 @@
 // admin approves (Send for approval → Approve & issue / Send back). Quantity with no requisition (direct items, or a line raised above
 // its requisitions) needs a reason per line and factory admin approval: Send for approval → Approve & issue,
 // or sent back to draft with the approver's reason.
+// The trim store reads POs too (22 Nov 2026), without prices: the server leaves out rates, GST, values, totals, payment terms,
+// history details and documents; this page then shows item, quantity, delivery, what each line covers, receipts and history.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Send, Ban, Pencil, Trash2, Plus, FileDown, FileSpreadsheet, Upload, Info, PackageOpen, PackageX, ShieldCheck, Undo2, PackagePlus, Workflow } from 'lucide-react';
@@ -24,6 +26,7 @@ import { exportPoPdf, exportPoExcel } from './poPrint';
 import RequisitionLinePicker from './RequisitionLinePicker';
 import DirectItemsEditor, { directProblem, directPayload } from './DirectItemsEditor';
 import { GRN_STATUS } from './grnShared';
+import { useSeesPrices } from '../V3Access';
 
 const fmt = (v, uom) => Number(v || 0).toLocaleString('en-IN', { maximumFractionDigits: uom === 'pcs' ? 0 : 3 });
 const ACTION = { CREATED: 'Created', EDITED: 'Edited', ISSUED: 'Issued', REVISED: 'Revised', CANCELLED: 'Cancelled', SHORT_CLOSED: 'Short-closed', DOCUMENT: 'Document', RECEIPT: 'Goods received', RETURNED: 'Returned to supplier',
@@ -34,6 +37,7 @@ const needUnits = (l) => (l.covered > 0 ? Math.ceil(Math.round((l.covered / l.fa
 export default function PurchaseOrderPage() {
     const { id } = useParams();
     const [po, setPo] = useState(null);
+    const prices = useSeesPrices();
     const [canManage, setCanManage] = useState(false);
     const [canReceive, setCanReceive] = useState(false);
     const [canApprove, setCanApprove] = useState(false);
@@ -93,7 +97,7 @@ export default function PurchaseOrderPage() {
     const editLine = (l) => { setFormError(''); setLineEdit({ line: l, qty: String(l.qty), rate: String(l.rate), gst_pct: String(l.gst_pct), delivery_date: l.delivery_date || '', supplier_code: l.supplier_code || '', garment_colour: l.garment_colour || '', notes: l.notes || '', reason: '', extra_reason: l.extra_reason || '', extra_note: l.extra_note || '' }); };
     const pending = po.status === 'PENDING_APPROVAL';
     const rupees = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
-    const limitNote = Number(po.approval_limit) > 0 ? `${rupees(po.totals.total)} is above the ${rupees(po.approval_limit)} approval limit` : 'Every PO needs factory admin approval (no approval limit set)';
+    const limitNote = !prices || !po.totals ? 'It needs factory admin approval' : Number(po.approval_limit) > 0 ? `${rupees(po.totals.total)} is above the ${rupees(po.approval_limit)} approval limit` : 'Every PO needs factory admin approval (no approval limit set)';
 
     // Rates typed in the table: what each line shows now, which changed, and "apply to the other shades".
     const draftOf = (l) => drafts[l.id] || { rate: String(l.rate), gst_pct: String(l.gst_pct) };
@@ -181,10 +185,10 @@ export default function PurchaseOrderPage() {
             {po.status === 'DRAFT' && po.needs_approval && !po.approval_rejected_reason && (
                 <p className="text-sm text-amber-800 mb-3">{limitNote} — {canApprove ? 'issuing it records your approval.' : 'it needs factory admin approval before it is issued.'}</p>
             )}
-            {po.status === 'DRAFT' && !po.needs_approval && Number(po.approval_limit) > 0 && po.lines.length > 0 && (
+            {prices && po.status === 'DRAFT' && !po.needs_approval && Number(po.approval_limit) > 0 && po.lines.length > 0 && (
                 <p className="text-sm text-emerald-700 mb-3">{rupees(po.totals.total)} — within the {rupees(po.approval_limit)} approval limit: issued without approval.</p>
             )}
-            {issued && po.approved_by_name && <p className="text-sm text-emerald-700 mb-1">Approved by {po.approved_by_name}{po.approved_at ? ` on ${new Date(po.approved_at).toLocaleString()}` : ''} {po.approved_total ? ` for ${rupees(po.approved_total)}` : ''}. Changes that take it above that need the factory admin again.</p>}
+            {issued && po.approved_by_name && <p className="text-sm text-emerald-700 mb-1">Approved by {po.approved_by_name}{po.approved_at ? ` on ${new Date(po.approved_at).toLocaleString()}` : ''} {prices && po.approved_total ? ` for ${rupees(po.approved_total)}` : ''}. Changes that take it above that need the factory admin again.</p>}
             {issued && <p className="text-sm text-indigo-700 mb-3">Issued {new Date(po.issued_at).toLocaleString()}{po.issued_by_name ? ` by ${po.issued_by_name}` : ''}. Changes need a reason and become revisions.</p>}
 
             <div className="flex flex-wrap gap-2 mb-3">
@@ -201,9 +205,10 @@ export default function PurchaseOrderPage() {
                 {(editable || (canManage && pending)) && !anyReceived && <SecondaryButton onClick={() => askReason({ title: `Cancel ${po.po_no}`, confirm: 'Cancel purchase order', run: (r) => purchasingApi.cancel(id, r) })}><Ban size={14} /> Cancel</SecondaryButton>}
                 <span className="ml-auto flex gap-2">
                     {/* The PO's trail: GRNs, invoices and where the goods went, as a map (20 Nov 2026). */}
-                    {po.status !== 'DRAFT' && po.status !== 'PENDING_APPROVAL' && <Link to={`/v3/purchasing/orders/${po.id}/trail`}><SecondaryButton><Workflow size={14} /> Trail</SecondaryButton></Link>}
-                    <SecondaryButton onClick={exportPdf}><FileDown size={14} /> PDF</SecondaryButton>
-                    <SecondaryButton onClick={exportExcel}><FileSpreadsheet size={14} /> Excel</SecondaryButton>
+                    {prices && po.status !== 'DRAFT' && po.status !== 'PENDING_APPROVAL' && <Link to={`/v3/purchasing/orders/${po.id}/trail`}><SecondaryButton><Workflow size={14} /> Trail</SecondaryButton></Link>}
+                    {/* The PO document carries rates: not for the stores. */}
+                    {prices && <SecondaryButton onClick={exportPdf}><FileDown size={14} /> PDF</SecondaryButton>}
+                    {prices && <SecondaryButton onClick={exportExcel}><FileSpreadsheet size={14} /> Excel</SecondaryButton>}
                 </span>
             </div>
             <ErrorBox text={error} />
@@ -218,7 +223,7 @@ export default function PurchaseOrderPage() {
                 </div>
                 <div className="bg-white border border-slate-200 rounded-xl p-4 text-sm grid grid-cols-2 gap-2">
                     <div><p className="text-xs font-bold text-slate-500">Delivery</p><p className="font-semibold">{po.delivery_date ? fmtDate(po.delivery_date) : 'per line'}</p></div>
-                    <div><p className="text-xs font-bold text-slate-500">Payment terms</p><p className="font-semibold">{po.payment_terms_days} days</p></div>
+                    {prices && <div><p className="text-xs font-bold text-slate-500">Payment terms</p><p className="font-semibold">{po.payment_terms_days} days</p></div>}
                     <div><p className="text-xs font-bold text-slate-500">Supplier reference</p><p className="font-semibold">{po.supplier_reference || '—'}</p></div>
                     <div><p className="text-xs font-bold text-slate-500">Delivery terms</p><p className="font-semibold">{po.delivery_terms || '—'}</p></div>
                     <div><p className="text-xs font-bold text-slate-500">Tax</p><p className="font-semibold">{intra ? `CGST + SGST (both in ${po.company_state_name})` : `IGST (${po.supplier_state_name} → ${po.company_state_name})`}</p></div>
@@ -261,7 +266,7 @@ export default function PurchaseOrderPage() {
                     item; Edit / Remove are small icons stacked in one narrow column. */}
                 <table className="w-full text-sm min-w-[780px]">
                     <thead className="bg-slate-50 text-xs font-bold text-slate-500 uppercase tracking-wider">
-                        <tr className="text-right"><th className="px-3 py-2.5 text-left w-8">#</th><th className="px-3 py-2.5 text-left w-full min-w-[300px]">Item</th><th className="px-3 py-2.5">Qty</th><th className="px-3 py-2.5">Rate (₹)</th><th className="px-3 py-2.5">Taxable</th><th className="px-3 py-2.5">GST</th><th className="px-3 py-2.5">Amount</th>{editable && <th className="px-1 py-2.5 w-8" aria-label="Line actions" />}</tr>
+                        <tr className="text-right"><th className="px-3 py-2.5 text-left w-8">#</th><th className="px-3 py-2.5 text-left w-full min-w-[300px]">Item</th><th className="px-3 py-2.5">Qty</th>{prices && <><th className="px-3 py-2.5">Rate (₹)</th><th className="px-3 py-2.5">Taxable</th><th className="px-3 py-2.5">GST</th><th className="px-3 py-2.5">Amount</th></>}{editable && <th className="px-1 py-2.5 w-8" aria-label="Line actions" />}</tr>
                     </thead>
                     <tbody>
                         {po.lines.length === 0 && <tr><td colSpan={8} className="px-4 py-6 text-center text-slate-400">No lines. Add approved requisition lines.</td></tr>}
@@ -288,7 +293,7 @@ export default function PurchaseOrderPage() {
                                     </span></td>
                                 <td className={`px-3 py-2.5 whitespace-nowrap ${editable ? 'cursor-pointer hover:bg-indigo-50' : ''}`} onClick={editable ? () => editLine(l) : undefined} title={editable ? 'Edit quantity, rate, GST, delivery' : undefined}><b>{fmt(l.qty, 'm')}</b> {l.purchase_uom}<span className="block text-[11px] text-slate-500">= {fmt(l.usage_qty, l.uom)} {l.uom}</span>
                                     {(l.received_qty > 0 || l.pending_qty > 0) && <span className={`block text-[11px] font-semibold ${l.received_qty + 0.0005 >= l.qty ? 'text-emerald-700' : 'text-amber-700'}`}>received {fmt(l.received_qty, 'm')}{l.pending_qty > 0 ? ` · ${fmt(l.pending_qty, 'm')} awaiting approval` : ''}</span>}</td>
-                                {editable ? (
+                                {!prices ? null : editable ? (
                                     <td className="px-3 py-2 min-w-[10rem]">
                                         <input className={`${inputCls} !px-2.5 !py-1.5 !w-36 min-w-[9rem] text-right text-base font-bold tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none ${Number(draftOf(l).rate) > 0 ? '' : 'border-rose-400 bg-rose-50'} ${drafts[l.id] && Number(drafts[l.id].rate) !== l.rate ? 'border-indigo-400' : ''}`}
                                             type="number" min="0" step="any" inputMode="decimal" value={draftOf(l).rate} placeholder="rate" aria-label={`Rate of line ${l.line_no} per ${l.purchase_uom}`}
@@ -301,11 +306,11 @@ export default function PurchaseOrderPage() {
                                         )}
                                     </td>
                                 ) : <td className={`px-3 py-2.5 ${l.rate > 0 ? '' : 'text-rose-700 font-bold'}`}>{l.rate > 0 ? inr(l.rate) : 'no rate'}</td>}
-                                <td className="px-3 py-2.5">{inr(l.value)}</td>
+                                {prices && <><td className="px-3 py-2.5">{inr(l.value)}</td>
                                 <td className={`px-3 py-2.5 whitespace-nowrap ${editable ? 'min-w-[7rem]' : ''}`}>
                                     {editable ? <span className="inline-flex items-center gap-1"><input className={`${inputCls} !px-2 !py-1.5 !w-20 min-w-[5rem] text-right font-semibold tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none ${drafts[l.id] && Number(drafts[l.id].gst_pct) !== l.gst_pct ? 'border-indigo-400' : ''}`} type="number" min="0" max="40" step="0.01" value={draftOf(l).gst_pct} aria-label={`GST % of line ${l.line_no}`} onChange={e => setDraft(l, { gst_pct: e.target.value })} />%</span> : `${l.gst_pct}%`}
                                     <span className="block text-[11px] text-slate-500">{intra ? `${inr(l.cgst)} + ${inr(l.sgst)}` : inr(l.igst)}</span></td>
-                                <td className="px-3 py-2.5 font-bold whitespace-nowrap">{inr(l.total)}</td>
+                                <td className="px-3 py-2.5 font-bold whitespace-nowrap">{inr(l.total)}</td></>}
                                 {editable && (
                                     <td className="px-1 py-2 align-top">
                                         <div className="flex flex-col items-center gap-1">
@@ -322,11 +327,12 @@ export default function PurchaseOrderPage() {
                         ))}
                     </tbody>
                     <tfoot className="border-t-2 border-slate-200 text-right tabular-nums font-bold">
-                        <tr><td colSpan={4} className="px-3 py-2 text-left">Total</td><td className="px-3 py-2">{inr(po.totals.taxable)}</td><td className="px-3 py-2">{inr(po.totals.gst)}</td><td className="px-3 py-2 text-base whitespace-nowrap">₹ {inr(po.totals.total)}</td>{editable && <td />}</tr>
+                        {!prices ? <tr><td colSpan={2} className="px-3 py-2 text-left">Total · {po.lines.length} line(s)</td><td className="px-3 py-2 whitespace-nowrap">{[...new Set(po.lines.map(l => l.purchase_uom))].map(u => `${fmt(po.lines.filter(l => l.purchase_uom === u).reduce((t, l) => t + l.qty, 0), 'm')} ${u}`).join(' + ')}</td></tr>
+                        : <tr><td colSpan={4} className="px-3 py-2 text-left">Total</td><td className="px-3 py-2">{inr(po.totals.taxable)}</td><td className="px-3 py-2">{inr(po.totals.gst)}</td><td className="px-3 py-2 text-base whitespace-nowrap">₹ {inr(po.totals.total)}</td>{editable && <td />}</tr>}
                     </tfoot>
                 </table>
             </div>
-            <p className="text-xs text-slate-600 mb-4">{intra ? `CGST ₹${inr(po.totals.cgst)} + SGST ₹${inr(po.totals.sgst)}` : `IGST ₹${inr(po.totals.igst)}`} · {amountInWords(po.totals.total)}</p>
+            {prices && <p className="text-xs text-slate-600 mb-4">{intra ? `CGST ₹${inr(po.totals.cgst)} + SGST ₹${inr(po.totals.sgst)}` : `IGST ₹${inr(po.totals.igst)}`} · {amountInWords(po.totals.total)}</p>}
             {po.lines.some(l => l.uncommitted > 0) && (
                 <p className="mb-4 text-xs text-sky-800 flex items-start gap-1.5"><Info size={13} className="mt-0.5 shrink-0" />Uncommitted quantity (minimum order, pack rounding) is counted by planning as incoming and covers the next orders before anything is raised again.</p>
             )}
@@ -354,7 +360,8 @@ export default function PurchaseOrderPage() {
             )}
 
             <div className="grid lg:grid-cols-2 gap-4">
-                <div className="bg-white border border-slate-200 rounded-xl p-4">
+                {/* Documents (quotations, signed POs) carry prices: not for the stores. */}
+                {prices && <div className="bg-white border border-slate-200 rounded-xl p-4">
                     <p className="text-xs font-black uppercase tracking-wider text-slate-500 mb-2">Documents</p>
                     {po.documents.length === 0 ? <p className="text-sm text-slate-400 mb-2">None yet (signed PO, quotation, supplier confirmation…).</p> : (
                         <ul className="text-sm mb-3 space-y-1">
@@ -369,7 +376,7 @@ export default function PurchaseOrderPage() {
                             <SecondaryButton onClick={upload} disabled={busy || !docForm.file}><Upload size={14} /> Upload</SecondaryButton>
                         </div>
                     )}
-                </div>
+                </div>}
                 <div className="bg-white border border-slate-200 rounded-xl p-4">
                     <p className="text-xs font-black uppercase tracking-wider text-slate-500 mb-2">History</p>
                     <div className="divide-y divide-slate-100 text-sm">

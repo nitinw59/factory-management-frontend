@@ -55,6 +55,7 @@ export const purchasingApi = {
     // Supplier invoices (three-way match)
     billable: (supplierId) => api.get('/v3/purchasing/invoices/billable', { params: { supplier_id: supplierId } }),
     waitingInvoices: (params) => api.get('/v3/purchasing/invoices/waiting', { params }),   // GRNs waiting for a supplier invoice
+    waitingApproval: (params) => api.get('/v3/purchasing/invoices/waiting-approval', { params }),   // GRNs waiting for approval — not billable yet
     orderTrail: (id) => api.get(`/v3/purchasing/purchase-orders/${id}/trail`),   // PO → GRNs → invoices → where it went
     checkInvoice: (data) => api.post('/v3/purchasing/invoices/check', data),
     invoices: (params) => api.get('/v3/purchasing/invoices', { params }),

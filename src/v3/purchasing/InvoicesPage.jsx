@@ -1,7 +1,8 @@
 // Supplier invoices: register with match status, supplier / date / search
 // filters, Excel; factory admin sets the match tolerance here.
 // Two tabs (20 Nov 2026): Invoices, and Waiting for invoice — GRNs with goods not yet billed (WaitingForInvoice.jsx), so accounts
-// see what to enter without first picking a supplier. ?view=waiting opens it (My work links there).
+// see what to enter without first picking a supplier. ?view=waiting opens it (My work links there). Below it (21 Nov 2026), the GRNs
+// waiting for the purchase manager's approval — not billable yet, shown apart.
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Plus, FileSpreadsheet } from 'lucide-react';
@@ -20,12 +21,14 @@ export default function InvoicesPage() {
     const [params, setParams] = useSearchParams();
     const view = params.get('view') === 'waiting' ? 'waiting' : 'register';
     const [waiting, setWaiting] = useState(null);
+    const [pending, setPending] = useState([]);
     const [waitErr, setWaitErr] = useState('');
     const [canEnter, setCanEnter] = useState(false);
     useEffect(() => {
         purchasingApi.permissions().then(res => setCanEnter(Boolean(res.data.invoice))).catch(() => {});
         purchasingApi.waitingInvoices().then(res => setWaiting(res.data))
             .catch(err => { if (err?.response?.status === 403) setWaiting(false); else setWaitErr(apiError(err, 'Failed to load the GRNs waiting for an invoice.')); });
+        purchasingApi.waitingApproval().then(res => setPending(res.data || [])).catch(() => setPending([]));   // an older server has no such list
     }, []);
     const wValue = (waiting || []).reduce((t, r) => t + r.value, 0);
     const wOld = (waiting || []).filter(r => r.age_days > 30).length;
@@ -35,7 +38,7 @@ export default function InvoicesPage() {
             {[['register', 'Invoices', null], ['waiting', 'Waiting for invoice', waiting ? `${waiting.length} GRN${waiting.length === 1 ? '' : 's'} · ₹${inr(wValue)}` : '…']].map(([k, label, extra]) => (
                 <button key={k} type="button" role="tab" aria-selected={view === k} onClick={() => go(k)}
                     className={`px-3 py-2 text-sm font-semibold border-b-2 -mb-px ${view === k ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>
-                    {label}{extra && <span className={`ml-1.5 text-xs font-normal ${wOld && k === 'waiting' ? 'text-rose-700' : 'text-slate-500'}`}>{extra}{wOld && k === 'waiting' ? ` · ${wOld} over 30 days` : ''}</span>}
+                    {label}{extra && <span className={`ml-1.5 text-xs font-normal ${wOld && k === 'waiting' ? 'text-rose-700' : 'text-slate-500'}`}>{extra}{wOld && k === 'waiting' ? ` · ${wOld} over 30 days` : ''}</span>}{k === 'waiting' && pending.length > 0 && <span className="ml-1.5 text-xs font-normal text-amber-800">+ {pending.length} waiting for approval</span>}
                 </button>
             ))}
         </div>
@@ -47,7 +50,7 @@ export default function InvoicesPage() {
                     actions={canEnter ? <PrimaryButton onClick={() => navigate('/v3/purchasing/invoices/new')}><Plus size={14} /> Enter invoice</PrimaryButton> : null} />
                 {tabs}
                 <ErrorBox text={waitErr} />
-                {!waiting ? (waitErr ? null : <Loading />) : <WaitingForInvoice rows={waiting} canEnter={canEnter} />}
+                {!waiting ? (waitErr ? null : <Loading />) : <WaitingForInvoice rows={waiting} pending={pending} canEnter={canEnter} />}
             </div>
         );
     }

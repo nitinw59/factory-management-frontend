@@ -53,20 +53,24 @@ export function exportPickList(k, lh) {
     }
     const amt = (g, q, units) => (g.in_units ? `${units} ${g.purchase_uom} (${num(q)} ${g.uom})` : `${num(q)} ${g.uom}`);
     const groups = groupKitLines(k.lines.filter(l => l.remaining > 0));
+    // 22 Nov 2026 (owner, /v3/trim-kits/33): trim type column, so the store picks by type (thread, zipper, button …).
+    const types = new Set(groups.map(g => g.type_name).filter(Boolean));
     autoTable(doc, {
         startY: y,
-        head: [['#', 'Item', 'For the order', 'Over-cut', 'Put in the kit', 'In stock', 'Picked', 'Note']],
+        head: [['#', 'Trim type', 'Item', 'For the order', 'Over-cut', 'Put in the kit', 'In stock', 'Picked', 'Note']],
         body: groups.map(g => {
             const ord = g.lines.filter(l => !isOver(l)); const ov = g.lines.filter(isOver);
             const sum = (ls) => ls.reduce((a, l) => a + l.remaining, 0); const units = (ls) => ls.reduce((a, l) => a + unitsOwedOf(l), 0);
-            return [g.line_no, `${g.label}${g.extra ? ' (extra line)' : ''}${g.stock_on_hand <= 0 ? ' — NOT IN STORE' : ''}`,
+            return [g.line_no, g.type_name || '—', `${g.label}${g.extra ? ' (extra line)' : ''}${g.stock_on_hand <= 0 ? ' — NOT IN STORE' : ''}`,
                 ord.length ? amt(g, sum(ord), units(ord)) : '—', ov.length ? amt(g, sum(ov), units(ov)) : '—', amt(g, g.remaining, g.units_owed),
                 `${num(g.stock_on_hand)} ${g.uom}`, '', ''];
         }),
-        ...GRID, styles: { ...GRID.styles, fontSize: 8, cellPadding: 1.6, minCellHeight: 8, valign: 'middle' },
+        foot: [[{ content: `Total · ${groups.length} item(s) · ${types.size} trim type(s)`, colSpan: 3 }, '', '', '', '', '', '']],
+        ...GRID, showFoot: 'lastPage', styles: { ...GRID.styles, fontSize: 8, cellPadding: 1.6, minCellHeight: 8, valign: 'middle' },
         headStyles: { fillColor: [30, 41, 59], textColor: 255, fontStyle: 'bold', valign: 'middle' },
-        columnStyles: { 0: { cellWidth: 8, halign: 'center' }, 2: { halign: 'right', cellWidth: 26 }, 3: { halign: 'right', cellWidth: 24 }, 4: { halign: 'right', cellWidth: 28, fontStyle: 'bold' }, 5: { halign: 'right', cellWidth: 22 }, 6: { cellWidth: 16 }, 7: { cellWidth: 26 } },
-        didParseCell: (d) => { if (d.section === 'head' && [2, 3, 4, 5].includes(d.column.index)) d.cell.styles.halign = 'right'; },
+        footStyles: { fillColor: [241, 245, 249], textColor: 20, fontStyle: 'bold' },
+        columnStyles: { 0: { cellWidth: 8, halign: 'center' }, 1: { cellWidth: 24 }, 3: { halign: 'right', cellWidth: 24 }, 4: { halign: 'right', cellWidth: 20 }, 5: { halign: 'right', cellWidth: 27, fontStyle: 'bold' }, 6: { halign: 'right', cellWidth: 20 }, 7: { cellWidth: 14 }, 8: { cellWidth: 20 } },
+        didParseCell: (d) => { if (d.section === 'head' && [3, 4, 5, 6].includes(d.column.index)) d.cell.styles.halign = 'right'; },
         margin: { left: 8, right: 8 },
     });
     y = doc.lastAutoTable.finalY + 8;

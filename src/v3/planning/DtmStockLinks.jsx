@@ -1,9 +1,9 @@
 // DTM needs of an order (3 Nov 2026): each garment colour's need, the real trim item matched to it, and in-house links. The trim
 // store links stock that matches the fabric, the merchandiser or factory admin checks the shade and approves; approving makes the
 // match and allocates. Otherwise the purchase manager's code on the PO makes the match (backend dtmMatch.js, dtmLinksController.js).
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, Search } from 'lucide-react';
 import Modal from '../../shared/Modal';
 import { planningApi } from '../api/planningApi';
 import { apiError } from '../api/mastersApi';
@@ -115,11 +115,17 @@ export function DtmLinksPanel({ orderId, tick, onChanged, onLinks }) {
 }
 
 // The store or the purchase manager picks the item and how much to allocate. One need, one item: any balance is bought under the same code.
+// 22 Nov 2026: a search (every word typed must be in the name; "tkt120" finds "TKT 120") and same-quality items first (the server
+// marks them: every word of the quality in the name). The picked item stays at the top even when the search hides it.
+const squash = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+const matches = (label, words) => { const l = String(label).toLowerCase(), sq = squash(label); return words.every(w => l.includes(w) || (squash(w) && sq.includes(squash(w)))); };
+
 export function DtmLinkModal({ orderId, item, onClose, onDone }) {
     const [d, setD] = useState(null);
     const [sourceId, setSourceId] = useState('');
     const [qty, setQty] = useState('');
     const [note, setNote] = useState('');
+    const [q, setQ] = useState('');
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
     useEffect(() => {
@@ -130,35 +136,66 @@ export function DtmLinkModal({ orderId, item, onClose, onDone }) {
     const n = Number(qty);
     const bad = !src || !(n > 0) || n > most + 1e-9 || (d.item.uom === 'pcs' && !Number.isInteger(n));
     const pick = (s) => { setSourceId(s.id); setQty(String(Math.min(d.required, s.free))); };
-    const save = async () => {
-        setBusy(true); setError('');
-        try { await planningApi.createDtmLink({ order_id: orderId, dtm_item_id: item.item_id, source_item_id: sourceId, qty: n, note: note.trim() || undefined }); onDone(); }
-        catch (err) { setError(apiError(err, 'Failed to link the stock.')); setBusy(false); }
-    };
+    const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const shown = useMemo(() => (d?.sources || []).filter(s => matches(s.label, words)), [d, q]); // eslint-disable-line react-hooks/exhaustive-deps
+    const hiddenPick = src && !shown.includes(src) ? src : null;
+    const same = shown.filter(s => s.same_quality), other = shown.filter(s => !s.same_quality);
+    const grouped = (d?.sources || []).some(s => s.same_quality);
+    const qw = (d?.quality_words || []).join(' + ');
+    const u = d?.item.uom;
+    const total = (list) => list.reduce((t, s) => t + s.free, 0);
+    const row = (s, tag) => (
+        <tr key={`${tag || ''}${s.id}`} className={`border-t border-slate-100 cursor-pointer ${sourceId === s.id ? 'bg-violet-50' : 'hover:bg-slate-50'}`} onClick={() => pick(s)}>
+            <td className="px-3 py-2"><input type="radio" name="dtm-source" checked={sourceId === s.id} onChange={() => pick(s)} aria-label={s.label} /></td>
+            <td className="px-3 py-2 font-semibold text-slate-800">{s.label}{tag && <span className="ml-2 text-[11px] font-black px-1.5 py-0.5 rounded border bg-violet-100 text-violet-900 border-violet-300">{tag}</span>}</td>
+            <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{fmt(s.free, u)} {u}</td>
+        </tr>
+    );
+    const head = (text, list) => (
+        <tr className="border-t border-slate-200 bg-slate-50/70"><td colSpan={2} className="px-3 py-1.5 text-xs font-bold text-slate-600">{text} · {list.length}</td>
+            <td className="px-3 py-1.5 text-right text-xs font-bold text-slate-500 tabular-nums whitespace-nowrap">{fmt(total(list), u)} {u}</td></tr>
+    );
     return (
         <Modal title="Use in-house stock for this DTM need" onClose={onClose}>
-            <div className="space-y-3 w-[min(760px,92vw)]">
+            <div className="space-y-3 w-[min(760px,calc(100vw-6rem))]">
                 <ErrorBox text={error} />
                 {!d ? (!error && <Loading />) : <>
-                    <p className="text-sm text-slate-700"><b>{item.label}</b>. Needed: <b>{fmt(d.required, d.item.uom)} {d.item.uom}</b>. The merchandiser checks the shade against the fabric. If there is not enough, the balance is bought under the same code.</p>
-                    {d.sources.length === 0 ? <p className="text-sm text-slate-500 py-3">No free stock of this trim type and unit.</p> : (
-                        <div className="max-h-[45vh] overflow-auto border border-slate-200 rounded-xl">
-                            <table className="w-full text-sm">
-                                <thead className="text-left text-xs font-bold text-slate-500 uppercase tracking-wider bg-slate-50 sticky top-0"><tr><th className="px-3 py-2 w-8" /><th className="px-3 py-2">Stock item</th><th className="px-3 py-2 text-right">Free</th></tr></thead>
-                                <tbody>{d.sources.map(s => (
-                                    <tr key={s.id} className={`border-t border-slate-100 cursor-pointer ${sourceId === s.id ? 'bg-violet-50' : 'hover:bg-slate-50'}`} onClick={() => pick(s)}>
-                                        <td className="px-3 py-2"><input type="radio" name="dtm-source" checked={sourceId === s.id} onChange={() => pick(s)} aria-label={s.label} /></td>
-                                        <td className="px-3 py-2 font-semibold text-slate-800">{s.label}</td>
-                                        <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{fmt(s.free, d.item.uom)} {d.item.uom}</td>
-                                    </tr>
-                                ))}</tbody>
-                                <tfoot><tr className="border-t-2 border-slate-200 bg-slate-50 text-xs font-bold text-slate-600 sticky bottom-0"><td /><td className="px-3 py-2">Total {d.sources.length} item(s)</td><td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{fmt(d.sources.reduce((t, s) => t + s.free, 0), d.item.uom)} {d.item.uom}</td></tr></tfoot>
-                            </table>
+                    <p className="text-sm text-slate-700"><b>{item.label}</b>. Needed: <b>{fmt(d.required, u)} {u}</b>. The merchandiser checks the shade against the fabric. If there is not enough, the balance is bought under the same code.</p>
+                    {(d.item.dtm_reference || d.item.colours?.length > 0) && (
+                        <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-0.5 text-sm bg-violet-50/60 border border-violet-200 rounded-lg px-3 py-2">
+                            {d.item.dtm_reference && <><span className="text-slate-500">Match to fabric</span><b className="text-slate-800">{d.item.dtm_reference}</b></>}
+                            {d.item.colours?.length > 0 && <><span className="text-slate-500">Garment colour</span><b className="text-slate-800">{d.item.colours.join(', ')}</b></>}
                         </div>
                     )}
+                    {d.sources.length === 0 ? <p className="text-sm text-slate-500 py-3">No free stock of this trim type and unit.</p> : <>
+                        <div className="relative">
+                            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                            <input className={`${inputCls} pl-9`} value={q} onChange={e => setQ(e.target.value)} placeholder="Search brand, code, shade…" aria-label="Search stock" autoFocus />
+                        </div>
+                        <div className="max-h-[45vh] overflow-auto border border-slate-200 rounded-xl">
+                            <table className="w-full text-sm">
+                                <thead className="text-left text-xs font-bold text-slate-500 uppercase tracking-wider bg-slate-50 sticky top-0 z-10"><tr><th className="px-3 py-2 w-8" /><th className="px-3 py-2">Stock item</th><th className="px-3 py-2 text-right">Free</th></tr></thead>
+                                <tbody>
+                                    {hiddenPick && row(hiddenPick, 'Picked')}
+                                    {grouped ? <>
+                                        {same.length > 0 && head(`Same quality (name has ${qw})`, same)}
+                                        {same.map(s => row(s))}
+                                        {other.length > 0 && head(`Other ${d.item.type ? d.item.type.toLowerCase() : 'items'} of this unit`, other)}
+                                        {other.map(s => row(s))}
+                                    </> : shown.map(s => row(s))}
+                                    {shown.length === 0 && <tr className="border-t border-slate-100"><td colSpan={3} className="px-3 py-4 text-center text-slate-500">Nothing matches “{q.trim()}”. <button type="button" className="font-bold text-indigo-700 hover:underline" onClick={() => setQ('')}>Clear the search</button></td></tr>}
+                                </tbody>
+                                <tfoot><tr className="border-t-2 border-slate-200 bg-slate-50 text-xs font-bold text-slate-600 sticky bottom-0">
+                                    <td /><td className="px-3 py-2">{words.length ? `Showing ${shown.length} of ${d.sources.length} item(s)` : `Total ${d.sources.length} item(s)`}</td>
+                                    <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{fmt(total(shown), u)} {u}</td>
+                                </tr></tfoot>
+                            </table>
+                        </div>
+                        {!grouped && qw && <p className="text-xs text-slate-500">No item in stock is named with {qw}. Every {d.item.type ? d.item.type.toLowerCase() : 'item'} of this unit is listed; match by shade.</p>}
+                    </>}
                     {d.backfill_only > 0 && <p className="text-xs text-amber-800">{d.backfill_only} item(s) not listed: their stock is only the temporary backfill, which isn't on the shelf. Count them first.</p>}
                     <div className="grid grid-cols-2 gap-3">
-                        <Field label={`Allocate (${d.item.uom}) *`} hint={src ? `At most ${fmt(most, d.item.uom)} ${d.item.uom}.` : 'Choose the stock first.'}><input className={inputCls} type="number" min="0" step="any" value={qty} onChange={e => setQty(e.target.value)} /></Field>
+                        <Field label={`Allocate (${u}) *`} hint={src ? `${src.label}: at most ${fmt(most, u)} ${u}.` : 'Choose the stock first.'}><input className={inputCls} type="number" min="0" step="any" value={qty} onChange={e => setQty(e.target.value)} /></Field>
                         <Field label="Note"><input className={inputCls} maxLength={500} value={note} onChange={e => setNote(e.target.value)} placeholder="e.g. rack B2, close to the fabric" /></Field>
                     </div>
                     <div className="flex justify-end gap-2">
@@ -169,6 +206,11 @@ export function DtmLinkModal({ orderId, item, onClose, onDone }) {
             </div>
         </Modal>
     );
+    async function save() {
+        setBusy(true); setError('');
+        try { await planningApi.createDtmLink({ order_id: orderId, dtm_item_id: item.item_id, source_item_id: sourceId, qty: n, note: note.trim() || undefined }); onDone(); }
+        catch (err) { setError(apiError(err, 'Failed to link the stock.')); setBusy(false); }
+    }
 }
 
 // One in-house link, on the Approvals page: the merchandiser decides right there, with everything needed to decide.
