@@ -20,6 +20,11 @@ export const stylesApi = {
     // BOM versions and approval
     styleBoms: (styleId) => api.get(`/v3/styles/${styleId}/boms`),
     createBom: (styleId, copyFromBomId) => api.post(`/v3/styles/${styleId}/boms`, copyFromBomId ? { copy_from_bom_id: copyFromBomId } : {}),
+    // Templates (23 Nov 2026): import lines from any BOM; import a style's sizes / parts / route / details.
+    bomImportSources: (bomId, q) => api.get(`/v3/boms/${bomId}/import-sources`, { params: { q } }),
+    importBomLines: (bomId, data) => api.post(`/v3/boms/${bomId}/import-lines`, data),
+    styleImportSources: (styleId, q) => api.get(`/v3/styles/${styleId}/import-sources`, { params: { q } }),
+    importStyleSetup: (styleId, data) => api.post(`/v3/styles/${styleId}/import-setup`, data),
     boms: (params) => api.get('/v3/boms', { params }),
     bom: (id) => api.get(`/v3/boms/${id}`),
     updateBom: (id, data) => api.put(`/v3/boms/${id}`, data),

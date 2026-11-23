@@ -1,12 +1,13 @@
 // One style: Details / Sizes / Parts / Route tabs, each saved on its own.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, ArrowUp, ArrowDown, Trash2, Plus, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, ArrowUp, ArrowDown, Trash2, Plus, CheckCircle2, Download } from 'lucide-react';
 import { stylesApi } from '../api/stylesApi';
 import { apiError } from '../api/mastersApi';
 import { Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, ActiveBadge, Loading } from '../components/ui';
 import { UNIT_LABEL, SCOPE_LABEL } from './StageTypesPage';
 import StyleBomsTab from '../boms/StyleBomsTab';
+import ImportStyleModal from './ImportStyleModal';
 
 const TABS = [
     { key: 'details', label: 'Details' },
@@ -46,6 +47,7 @@ export default function StyleDetailPage() {
     const [route, setRoute] = useState([]);
     const [saving, setSaving] = useState(false);
     const [msg, setMsg] = useState(null);
+    const [importing, setImporting] = useState(false);   // Import from style (23 Nov 2026)
 
     const apply = useCallback((s) => {
         setStyle(s);
@@ -110,7 +112,11 @@ export default function StyleDetailPage() {
                 <h1 className="text-2xl font-black text-slate-900">{style.style_code}</h1>
                 <span className="text-slate-500">{style.name}</span>
                 <ActiveBadge active={style.is_active} />
+                {canEdit && <SecondaryButton onClick={() => setImporting(true)}><Download size={14} /> Import from style</SecondaryButton>}
             </div>
+            {importing && <ImportStyleModal style={style} onClose={() => setImporting(false)}
+                onDone={(s, report) => { setImporting(false); apply(s); setMsg({ ok: true, text: `Imported from ${report.template}.` }); setTab(report.sizes ? 'sizes' : report.parts ? 'parts' : report.route ? 'route' : 'details'); }} />}
+            {msg && msg.ok && /^Imported from/.test(msg.text) && <p className="-mt-2 mb-3 text-xs font-semibold text-emerald-700">{msg.text} Check each tab; the BOM can now use Import lines.</p>}
 
             <div className="flex gap-1 border-b border-slate-200 mb-4 overflow-x-auto">
                 {TABS.map(t => (

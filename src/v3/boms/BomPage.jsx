@@ -2,7 +2,7 @@
 // archive / new version / delete draft) and Colours / Lines / History tabs.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Send, Undo2, CheckCircle2, XCircle, Archive, Copy, Trash2, Plus } from 'lucide-react';
+import { ArrowLeft, Send, Undo2, CheckCircle2, XCircle, Archive, Copy, Trash2, Plus, Download } from 'lucide-react';
 import Modal from '../../shared/Modal';
 import { stylesApi } from '../api/stylesApi';
 import { mastersApi, apiError } from '../api/mastersApi';
@@ -11,6 +11,7 @@ import BomStatusBadge from './BomStatusBadge';
 import BomLinesTab from './BomLinesTab';
 import TrimCardTab from './TrimCardTab';
 import ApprovalPreviewModal from './ApprovalPreviewModal';
+import ImportLinesModal, { ImportReport } from './ImportLinesModal';
 
 const EDITABLE = ['DRAFT', 'REJECTED'];
 const TABS = [{ key: 'colours', label: 'Colours' }, { key: 'lines', label: 'Lines' }, { key: 'card', label: 'View style BOM' }, { key: 'history', label: 'History' }];
@@ -27,6 +28,8 @@ export default function BomPage() {
     const [busy, setBusy] = useState(false);
     const [rejecting, setRejecting] = useState(null); // reason text
     const [approving, setApproving] = useState(false);
+    const [importing, setImporting] = useState(false);   // Import lines (23 Nov 2026)
+    const [imported, setImported] = useState(null);     // the last import's report
     // Colours tab working copy: colour id → override tone id ('' = none)
     const [picked, setPicked] = useState(new Map());
     const [search, setSearch] = useState('');
@@ -90,6 +93,7 @@ export default function BomPage() {
 
             {/* Actions for this status and the signed-in user's rights */}
             <div className="flex flex-wrap gap-2 mb-4">
+                {editable && <SecondaryButton onClick={() => setImporting(true)} disabled={busy || coloursDirty}><Download size={14} /> Import lines from a template</SecondaryButton>}
                 {editable && <PrimaryButton onClick={() => run(() => stylesApi.submitBom(id))} busy={busy} disabled={busy || coloursDirty || notesDirty}><Send size={14} /> Submit for approval</PrimaryButton>}
                 {perms.bomEdit && bom.status === 'PENDING_APPROVAL' && <SecondaryButton onClick={() => run(() => stylesApi.withdrawBom(id))} disabled={busy}><Undo2 size={14} /> Withdraw</SecondaryButton>}
                 {perms.bomApprove && bom.status === 'PENDING_APPROVAL' && <>
@@ -106,6 +110,9 @@ export default function BomPage() {
             </div>
             {editable && (coloursDirty || notesDirty) && <p className="text-xs font-bold text-amber-700 mb-2">Save your changes before submitting.</p>}
             <ErrorBox text={error} />
+            {imported && <div className="mb-2"><ImportReport report={imported} done /></div>}
+            {importing && <ImportLinesModal bom={bom} hasLines={Boolean(bom.line_count ?? true)} onClose={() => setImporting(false)}
+                onDone={async (report) => { setImporting(false); setImported(report); const res = await stylesApi.bom(id); apply(res.data); setTab('lines'); }} />}
 
             <div className="flex gap-1 border-b border-slate-200 mb-4 mt-3">
                 {TABS.map(t => (
@@ -181,7 +188,7 @@ export default function BomPage() {
                 )}
 
                 {tab === 'lines' && (
-                    <BomLinesTab bom={bom} editable={editable} tones={tones} />
+                    <BomLinesTab key={bom.updated_at} bom={bom} editable={editable} tones={tones} />
                 )}
 
                 {tab === 'card' && <TrimCardTab bomId={id} refreshKey={bom.updated_at} />}

@@ -37,7 +37,8 @@ export default function ItemAllocationPage() {
 
     return (
         <div>
-            <Link to="/v3/planning/position" className="inline-flex items-center gap-1 text-sm font-semibold text-slate-500 hover:text-indigo-600 mb-3"><ArrowLeft size={15} /> Material position</Link>
+            {/* Back to the list as it was left: chip, sort, search (23 Nov 2026) */}
+            <Link to={(() => { try { return sessionStorage.getItem('v3.position.last') || '/v3/planning/position'; } catch { return '/v3/planning/position'; } })()} className="inline-flex items-center gap-1 text-sm font-semibold text-slate-500 hover:text-indigo-600 mb-3"><ArrowLeft size={15} /> Stock position</Link>
             <h1 className="text-2xl font-black text-slate-900">{item.label}</h1>
             <p className="text-sm text-slate-500 mb-4">{item.type_name} · {item.uom}{item.purchase_uom ? ` · bought in ${item.purchase_uom} of ${item.usage_per_purchase_uom} ${item.uom}` : ''}</p>
 

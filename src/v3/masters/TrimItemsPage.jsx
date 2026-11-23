@@ -5,19 +5,40 @@
 // Requests (27 Oct 2026): the store manager and the purchase manager don't add or edit directly — the same form sends a
 // request ("Send for approval"); the merchandiser / factory admin approve or reject it in the Requests panel (also
 // linked from the approvals inbox as ?requests=1). Until approved a new item doesn't exist and a change isn't applied.
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { Plus, Pencil, History, Copy, Search, X, FileSpreadsheet, ChevronDown, Send, CheckCircle2, XCircle, Undo2, Clock } from 'lucide-react';
+// 23 Nov 2026 (owner: "like we upgraded ux of stock position page … improve /v3/masters/trim-items?stock=1" → "build A and B"; a PC
+// screen, every column kept): one table, sticky header, grouped by trim type (collapsed; open while searching), one search, count
+// chips that filter (the store's Trim stock entry opens on In stock), Allocated / Free / On order / Last received / Last issued
+// columns (server ?stock=1), a row opens its stock history, "never moved" replaces "no opening stock", totals, Excel; the chip,
+// type and search in the URL, open groups and scroll kept for the session.
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { Plus, Pencil, History, Copy, FileSpreadsheet, ChevronDown, ChevronRight, Send, CheckCircle2, XCircle, Undo2, Clock, X } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { DtmChip } from '../boms/dtmShared';
 import Modal from '../../shared/Modal';
 import { mastersApi, apiError } from '../api/mastersApi';
 import { PageHeader, SearchInput, Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, ActiveBadge, Loading, fmtQty, useMastersPermissions } from '../components/ui';
-import { todayLocal } from '../salesOrders/SalesOrderStatusBadge';
+import { todayLocal, fmtDate } from '../salesOrders/SalesOrderStatusBadge';
 
 const PURCHASE_UNITS = ['pcs', 'cone', 'gross', 'box', 'roll', 'packet', 'dozen'];
 const UOM_LABEL = { pcs: 'pcs', m: 'm' };
-const DTM_FILTERS = [['', 'All items'], ['dtm', 'DTM qualities only'], ['plain', 'Without DTM qualities']];
+// Chips that filter (23 Nov 2026). WAITING only for those who see requests.
+const VIEWS = [
+    { key: 'ALL', label: 'All', test: () => true },
+    { key: 'STOCK', label: 'In stock', test: it => Number(it.on_hand) > 0, tone: 'emerald' },
+    { key: 'ZERO', label: 'Zero stock', test: it => !(Number(it.on_hand) > 0) && !it.is_dtm_quality, tone: 'slate' },
+    { key: 'RESERVED', label: 'Reserved', test: it => Number(it.allocated) > 0, tone: 'indigo', hint: 'some of it is allocated to orders' },
+    { key: 'IDLE', label: 'No order needs it', test: it => Number(it.on_hand) > 0 && !it.needed && !it.is_dtm_quality, tone: 'amber', hint: 'in stock, no open approved order needs it — slow-moving stock' },
+    { key: 'ONORDER', label: 'On order', test: it => Number(it.on_order) > 0, tone: 'sky', hint: 'on purchase orders sent to the supplier, not received yet' },
+    { key: 'DTM', label: 'DTM qualities', test: it => it.is_dtm_quality, tone: 'violet' },
+    { key: 'INACTIVE', label: 'Inactive', test: it => !it.is_active, tone: 'rose' },
+    { key: 'WAITING', label: 'Waiting for approval', test: (it, w) => w.has(String(it.id)), tone: 'amber', requests: true },
+];
+const TONE = { emerald: 'border-emerald-300 text-emerald-700', slate: 'border-slate-300 text-slate-600', indigo: 'border-indigo-300 text-indigo-700', amber: 'border-amber-300 text-amber-800', sky: 'border-sky-300 text-sky-700', violet: 'border-violet-300 text-violet-700', rose: 'border-rose-300 text-rose-700' };
+const UI_KEY = 'v3.trimstock.ui';
+const readUi = () => { try { return JSON.parse(sessionStorage.getItem(UI_KEY) || 'null') || {}; } catch { return {}; } };
+const writeUi = (patch) => { try { sessionStorage.setItem(UI_KEY, JSON.stringify({ ...readUi(), ...patch })); } catch { /* private mode */ } };
+const COLS = 12;
 
 const conversionText = (it) => (it.purchase_uom === it.usage_uom && Number(it.usage_per_purchase_uom) === 1
     ? `bought in ${it.usage_uom}`
@@ -39,6 +60,8 @@ function exportExcel(list, scope) {
         'DTM reference': it.dtm_reference || '', 'DTM base item': it.dtm_base_label || '',
         'Usage unit': it.usage_uom, 'Purchase unit': it.purchase_uom, 'Usage per purchase unit': Number(it.usage_per_purchase_uom),
         'On hand (usage unit)': Number(it.on_hand || 0), 'On hand (purchase units)': r2(Number(it.on_hand || 0) / Number(it.usage_per_purchase_uom || 1)),
+        Allocated: Number(it.allocated || 0), Free: Number(it.free ?? it.on_hand ?? 0), 'On order (sent POs)': Number(it.on_order || 0),
+        'Last received': it.last_in || '', 'Last issued': it.last_issue || '', 'Needed by an open order': it.needed ? 'yes' : '', 'Never moved': it.has_movements ? '' : 'yes',
         'Opening stock entered': it.has_opening ? 'yes' : 'no', 'DTM quality': it.is_dtm_quality ? 'yes' : '', 'HSN code': it.hsn_code || '', 'GST %': it.gst_pct != null && it.gst_pct !== '' ? Number(it.gst_pct) : '',
         Status: it.is_active ? 'Active' : 'Inactive',
     }));
@@ -73,16 +96,21 @@ export default function TrimItemsPage() {
     const perms = useMastersPermissions();
     const [items, setItems] = useState(null);
     const [types, setTypes] = useState([]);
-    const [search, setSearch] = useState('');
-    const [typeFilter, setTypeFilter] = useState('');
     const [params, setParams] = useSearchParams();
-    const dtmFilter = params.get('dtm') || '';
+    const [search, setSearch] = useState(params.get('q') || '');
+    const [typeFilter, setTypeFilter] = useState(params.get('type') || '');
+    // The store's "Trim stock" entry (?stock=1) opens on In stock; the item master (merchandiser) on All. ?dtm=dtm (older links) → DTM.
+    const [view, setView] = useState(() => (VIEWS.some(v => v.key === params.get('view')) ? params.get('view') : params.get('dtm') === 'dtm' ? 'DTM' : params.get('stock') === '1' ? 'STOCK' : 'ALL'));
+    const ui = useRef(readUi());
+    const uiKey = `${view}|${typeFilter}|${search.trim()}`;
+    const [open, setOpen] = useState(() => (ui.current.key === uiKey && Array.isArray(ui.current.open) ? new Set(ui.current.open) : null));   // null = collapsed (open while searching)
+    const scroller = useRef(null);
+    const restored = useRef(false);
     const [error, setError] = useState('');
     const [editing, setEditing] = useState(null);
     const [saving, setSaving] = useState(false);
     const [formError, setFormError] = useState('');
     const [ledgerItem, setLedgerItem] = useState(null);
-    const [groupSearch, setGroupSearch] = useState({});   // trim type id → text, when that group's search is open
     const [exportOpen, setExportOpen] = useState(false);
     const [requests, setRequests] = useState([]);
     const [notice, setNotice] = useState('');
@@ -92,7 +120,7 @@ export default function TrimItemsPage() {
     const seesRequests = perms.trimRequest || perms.trimApprove;
 
     const load = useCallback(() => {
-        Promise.all([mastersApi.trimItems({ include: 'dtm' }), mastersApi.trimTypes()])
+        Promise.all([mastersApi.trimItems({ include: 'dtm', stock: '1' }), mastersApi.trimTypes()])
             .then(([i, t]) => { setItems(i.data.filter(x => !x.dtm_base_item_id)); setTypes(t.data); })
             .catch(err => setError(apiError(err, 'Failed to load trim items.')));
     }, []);
@@ -104,15 +132,17 @@ export default function TrimItemsPage() {
     // Items with a change waiting for approval.
     const waitingChange = useMemo(() => new Set(requests.filter(r => r.kind === 'EDIT' && r.status === 'SUBMITTED').map(r => String(r.trim_item_id))), [requests]);
 
-    const shown = useMemo(() => {
+    // Search and type first; the chips count within that, then filter.
+    const searched = useMemo(() => {
         const q = search.trim().toLowerCase();
-        return (items || []).filter(it =>
-            (!typeFilter || String(it.trim_type_id) === typeFilter)
-            && (!dtmFilter || (dtmFilter === 'dtm') === Boolean(it.is_dtm_quality))
-            && (!q || `${it.brand} ${it.code} ${it.description || ''} ${it.dtm_reference || ''}`.toLowerCase().includes(q)));
-    }, [items, search, typeFilter, dtmFilter]);
+        return (items || []).filter(it => (!typeFilter || String(it.trim_type_id) === typeFilter)
+            && (!q || `${it.brand} ${it.code} ${it.description || ''} ${it.dtm_reference || ''} ${it.trim_type_name || ''}`.toLowerCase().includes(q)));
+    }, [items, search, typeFilter]);
+    const views = VIEWS.filter(v => !v.requests || seesRequests);
+    const counts = useMemo(() => Object.fromEntries(views.map(v => [v.key, searched.filter(it => v.test(it, waitingChange)).length])), [searched, waitingChange, seesRequests]);   // eslint-disable-line react-hooks/exhaustive-deps
+    const shown = useMemo(() => searched.filter(it => (VIEWS.find(v => v.key === view) || VIEWS[0]).test(it, waitingChange)), [searched, view, waitingChange]);
 
-    // Grouped by trim type (16 Oct 2026), types in name order; each group can be searched on its own.
+    // Grouped by trim type (16 Oct 2026), types in name order; one table (23 Nov 2026).
     const groups = useMemo(() => {
         const m = new Map();
         for (const it of shown) {
@@ -120,9 +150,33 @@ export default function TrimItemsPage() {
             if (!m.has(k)) m.set(k, { id: k, name: it.trim_type_name || 'No type', items: [] });
             m.get(k).items.push(it);
         }
-        return [...m.values()].sort((a, b) => a.name.localeCompare(b.name));
+        return [...m.values()].sort((a, b) => a.name.localeCompare(b.name)).map(g => {
+            const uoms = [...new Set(g.items.map(it => it.usage_uom))];
+            const sum = (k) => g.items.reduce((n, it) => n + Number(it[k] || 0), 0);
+            return { ...g, uom: uoms.length === 1 ? uoms[0] : null, inStock: g.items.filter(it => Number(it.on_hand) > 0).length, reserved: g.items.filter(it => Number(it.allocated) > 0).length,
+                onOrder: g.items.filter(it => Number(it.on_order) > 0).length, onHand: sum('on_hand'), allocated: sum('allocated'), free: sum('free') };
+        });
     }, [shown]);
-    const matchesGroup = (it, q) => !q || `${it.brand} ${it.code} ${it.description || ''} ${it.dtm_reference || ''}`.toLowerCase().includes(q.trim().toLowerCase());
+    const isOpen = (g) => (open ? open.has(g.id) : Boolean(search.trim()));
+    const toggle = (g) => setOpen(prev => { const n = new Set(prev || groups.filter(isOpen).map(x => x.id)); if (n.has(g.id)) n.delete(g.id); else n.add(g.id); return n; });
+    // The page's state in the URL (replace), open groups + scroll in this session — the stock history and Back keep the place.
+    useEffect(() => {
+        const next = new URLSearchParams();
+        if (params.get('stock') === '1') next.set('stock', '1');
+        if (view !== (params.get('stock') === '1' ? 'STOCK' : 'ALL')) next.set('view', view);
+        if (typeFilter) next.set('type', typeFilter);
+        if (search.trim()) next.set('q', search.trim());
+        if (params.get('requests')) next.set('requests', params.get('requests'));
+        if (next.toString() !== params.toString()) setParams(next, { replace: true });
+    }, [view, typeFilter, search]);   // eslint-disable-line react-hooks/exhaustive-deps
+    useEffect(() => { writeUi({ key: uiKey, open: open ? [...open] : null }); }, [open, uiKey]);
+    useLayoutEffect(() => {
+        if (restored.current || !items || !scroller.current) return;
+        restored.current = true;
+        if (ui.current.key === uiKey && ui.current.scroll) scroller.current.scrollTop = ui.current.scroll;
+    }, [items, uiKey]);
+    const onScroll = (e) => { const top = e.currentTarget.scrollTop; window.requestAnimationFrame(() => writeUi({ scroll: top, key: uiKey })); };
+    const pick = (k) => { setView(k); setOpen(null); if (scroller.current) scroller.current.scrollTop = 0; };
 
     const editingType = editing ? types.find(t => String(t.id) === String(editing.trim_type_id)) : null;
 
@@ -165,17 +219,14 @@ export default function TrimItemsPage() {
     return (
         <div>
             <PageHeader
-                title="Trim items & stock"
+                title={params.get('stock') === '1' ? 'Trim stock' : 'Trim items & stock'}
                 subtitle="One item per brand and code. Stock is kept in the usage unit."
                 actions={<>
-                    <select className={`${inputCls} w-44`} value={typeFilter} onChange={e => setTypeFilter(e.target.value)} aria-label="Filter by type">
+                    <select className={`${inputCls} !w-48`} value={typeFilter} onChange={e => setTypeFilter(e.target.value)} aria-label="Filter by type">
                         <option value="">All types</option>
                         {types.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                     </select>
-                    <select className={`${inputCls} w-44`} value={dtmFilter} onChange={e => setParams(e.target.value ? { dtm: e.target.value } : {})} aria-label="Filter DTM items">
-                        {DTM_FILTERS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                    </select>
-                    <SearchInput value={search} onChange={setSearch} placeholder="Search brand, code, description, DTM reference" />
+                    <SearchInput value={search} onChange={setSearch} placeholder="Search brand, code, description, type, DTM reference" />
                     <div className="relative">
                         <SecondaryButton onClick={() => setExportOpen(o => !o)} disabled={!items || items.length === 0} aria-haspopup="menu" aria-expanded={exportOpen}><FileSpreadsheet size={15} /> Export <ChevronDown size={14} /></SecondaryButton>
                         {exportOpen && (<>
@@ -183,7 +234,7 @@ export default function TrimItemsPage() {
                             <div role="menu" className="absolute right-0 z-30 mt-1 w-72 bg-white border border-slate-200 rounded-lg shadow-lg py-1 text-sm">
                                 <button type="button" role="menuitem" className="w-full text-left px-3 py-2 hover:bg-slate-50 disabled:opacity-40" disabled={shown.length === 0}
                                     onClick={() => { exportExcel(shown, 'filtered'); setExportOpen(false); }}>
-                                    <b className="block text-slate-800">Items shown — {shown.length}</b><span className="text-xs text-slate-500">With the type, DTM and search filters applied (.xlsx)</span></button>
+                                    <b className="block text-slate-800">Items shown — {shown.length}</b><span className="text-xs text-slate-500">With the chip, type and search applied (.xlsx)</span></button>
                                 <button type="button" role="menuitem" className="w-full text-left px-3 py-2 hover:bg-slate-50"
                                     onClick={() => { exportExcel(items || [], 'all'); setExportOpen(false); }}>
                                     <b className="block text-slate-800">All trim items — {(items || []).length}</b><span className="text-xs text-slate-500">Every item, active and inactive (.xlsx)</span></button>
@@ -199,75 +250,86 @@ export default function TrimItemsPage() {
             {seesRequests && (requests.length > 0 || params.get('requests')) && (
                 <RequestsPanel requests={requests} approver={perms.trimApprove} onChanged={() => { loadRequests(); load(); }} />
             )}
-            {!items ? <Loading /> : groups.length === 0 ? (
-                <p className="bg-white border border-slate-200 rounded-xl px-4 py-8 text-center text-sm text-slate-400">No trim items.</p>
-            ) : (
-                <div className="space-y-4">
-                    {groups.map(g => {
-                        const q = groupSearch[g.id];
-                        const open = q !== undefined;
-                        const list = g.items.filter(it => matchesGroup(it, q));
-                        return (
-                            <div key={g.id} className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-                                <div className="flex flex-wrap items-center gap-2 px-4 py-2 bg-slate-50 border-b border-slate-200">
-                                    <p className="font-black text-slate-800">{g.name}</p>
-                                    <span className="text-xs font-semibold text-slate-500">{open && q ? `${list.length} of ${g.items.length}` : g.items.length} item{g.items.length === 1 ? '' : 's'}</span>
-                                    <div className="ml-auto flex items-center gap-1">
-                                        {open && (
-                                            <input className={`${inputCls} !py-1 w-64`} autoFocus value={q} placeholder={`Search ${g.name}: brand, code, description`}
-                                                onChange={e => setGroupSearch({ ...groupSearch, [g.id]: e.target.value })}
-                                                onKeyDown={e => { if (e.key === 'Escape') { const n = { ...groupSearch }; delete n[g.id]; setGroupSearch(n); } }}
-                                                aria-label={`Search in ${g.name}`} />
-                                        )}
-                                        <button type="button" title={open ? 'Close search' : `Search in ${g.name}`} aria-label={open ? `Close search in ${g.name}` : `Search in ${g.name}`}
-                                            onClick={() => { const n = { ...groupSearch }; if (open) delete n[g.id]; else n[g.id] = ''; setGroupSearch(n); }}
-                                            className={`p-1.5 rounded-md ${open ? 'text-indigo-700 bg-indigo-50' : 'text-slate-500 hover:bg-slate-200'}`}>{open ? <X size={15} /> : <Search size={15} />}</button>
-                                    </div>
-                                </div>
-                                <div className="overflow-x-auto">
-                                    <table className="w-full text-sm min-w-[820px]">
-                                        <thead className="text-left text-xs font-bold text-slate-500 uppercase tracking-wider">
-                                            <tr>
-                                                <th className="px-4 py-2">Brand · code</th><th className="px-4 py-2">Specs</th>
-                                                <th className="px-4 py-2">Units</th><th className="px-4 py-2 text-right">On hand</th><th className="px-4 py-2">Status</th><th className="px-4 py-2 w-20" />
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {list.length === 0 && <tr><td colSpan={6} className="px-4 py-4 text-center text-slate-400">Nothing in {g.name} matches “{q}”.</td></tr>}
-                                            {list.map(it => (
-                                                <tr key={it.id} className="border-t border-slate-100 align-top">
-                                                    <td className="px-4 py-2.5">
-                                                        <span className="font-semibold text-slate-800">{it.brand} · {it.code}</span>
-                                                        {waitingChange.has(String(it.id)) && <span className="ml-2 inline-flex items-center gap-1 text-[11px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200"><Clock size={11} /> change waiting for approval</span>}
-                                                        {it.description && <span className="block text-xs text-slate-500">{it.description}</span>}
-                                                        {it.is_dtm_quality && <span className="block mt-1 text-xs text-slate-600"><DtmChip /> DTM quality: no stock. Its real items are named {it.dtm_name} + the supplier's code.</span>}
-                                                        {it.dtm_base_item_id && <span className="block mt-1 text-xs text-slate-600"><DtmChip /> dyed to match <b>{it.dtm_reference}</b> <span className="text-slate-500">· base {it.dtm_base_label}</span></span>}
-                                                    </td>
-                                                    <td className="px-4 py-2.5 text-xs text-slate-600">
-                                                        {(it.spec_fields || []).filter(f => it.specs?.[f.key] !== undefined).map(f => `${f.label}: ${it.specs[f.key]}${f.unit ? ` ${f.unit}` : ''}`).join(' · ') || '—'}
-                                                    </td>
-                                                    <td className="px-4 py-2.5 text-xs text-slate-600">{UOM_LABEL[it.usage_uom]} · {conversionText(it)}</td>
-                                                    <td className="px-4 py-2.5 text-right tabular-nums">
-                                                        <span className="font-bold text-slate-800">{fmtQty(it.on_hand)} {UOM_LABEL[it.usage_uom]}</span>
-                                                        {Number(it.usage_per_purchase_uom) !== 1 && <span className="block text-xs text-slate-400">≈ {inPurchaseUnits(it)}</span>}
-                                                        {!it.has_opening && <span className="block text-[11px] font-bold text-amber-600">no opening stock</span>}
-                                                    </td>
-                                                    <td className="px-4 py-2.5"><ActiveBadge active={it.is_active} /></td>
-                                                    <td className="px-4 py-2.5 text-right whitespace-nowrap">
-                                                        <button type="button" onClick={() => setLedgerItem(it)} className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100" aria-label={`Stock history of ${it.brand} ${it.code}`}><History size={15} /></button>
-                                                        {(perms.trims || perms.trimRequest) && <button type="button" onClick={() => { setFormError(''); setEditing({ ...it, trim_type_id: String(it.trim_type_id), description: it.description || '', note: '' }); }}
-                                                            disabled={requestMode && waitingChange.has(String(it.id))} title={requestMode ? (waitingChange.has(String(it.id)) ? 'A change is already waiting for approval' : 'Request a change') : 'Edit'}
-                                                            className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100 disabled:opacity-40" aria-label={`${requestMode ? 'Request a change to' : 'Edit'} ${it.brand} ${it.code}`}><Pencil size={15} /></button>}
-                                                        {canAdd && <button type="button" onClick={() => startCopy(it)} className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100" aria-label={`Copy ${it.brand} ${it.code} into a new item`} title="Copy into a new item"><Copy size={15} /></button>}
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </div>
-                        );
-                    })}
+            {/* Chips: counts that filter (23 Nov 2026) */}
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+                {views.map(v => (
+                    <button key={v.key} type="button" onClick={() => pick(v.key)} title={v.hint || ''} aria-pressed={view === v.key}
+                        className={`rounded-full border px-3 py-1 text-sm font-semibold ${view === v.key ? 'border-indigo-600 bg-indigo-600 text-white' : `bg-white hover:bg-slate-50 ${TONE[v.tone] || 'border-slate-300 text-slate-700'}`}`}>
+                        {v.label} <span className="tabular-nums">{items ? counts[v.key] : '…'}</span>
+                    </button>
+                ))}
+                {groups.length > 0 && <span className="ml-auto flex gap-3 text-sm">
+                    <button type="button" className="font-semibold text-indigo-700 hover:underline" onClick={() => setOpen(new Set(groups.map(g => g.id)))}>Expand all</button>
+                    <button type="button" className="font-semibold text-indigo-700 hover:underline" onClick={() => setOpen(new Set())}>Collapse all</button>
+                </span>}
+            </div>
+            {!items ? <Loading /> : (
+                <div ref={scroller} onScroll={onScroll} className="bg-white border border-slate-200 rounded-xl overflow-auto max-h-[calc(100vh-15rem)]">
+                    <table className="w-full text-sm min-w-[1080px]">
+                        <thead className="sticky top-0 z-10 bg-slate-50 text-left text-xs font-bold text-slate-500 uppercase tracking-wider shadow-[0_1px_0_#e2e8f0]">
+                            <tr>
+                                <th className="px-2.5 py-2.5 w-24">Trim type</th><th className="px-2.5 py-2.5 min-w-[200px]">Brand · code</th><th className="px-2.5 py-2.5">Specs</th><th className="px-2.5 py-2.5">Units</th>
+                                <th className="px-2.5 py-2.5 text-right">On hand</th><th className="px-2.5 py-2.5 text-right">Allocated</th><th className="px-2.5 py-2.5 text-right">Free</th><th className="px-2.5 py-2.5 text-right">On order</th>
+                                <th className="px-2.5 py-2.5">Last received</th><th className="px-2.5 py-2.5">Last issued</th><th className="px-2.5 py-2.5">Status</th><th className="px-2.5 py-2.5 w-24" />
+                            </tr>
+                        </thead>
+                        {groups.length === 0 && <tbody><tr><td colSpan={COLS} className="px-4 py-8 text-center text-slate-400">{(items || []).length ? 'Nothing here — try another chip or clear the search.' : 'No trim items.'}</td></tr></tbody>}
+                        {groups.map(g => (
+                            <tbody key={g.id}>
+                                <tr className="border-t border-slate-200 bg-slate-100/70 cursor-pointer hover:bg-slate-100" onClick={() => toggle(g)}>
+                                    <td colSpan={COLS} className="px-3 py-2 text-left text-sm">
+                                        <span className="inline-flex items-center gap-1 font-black text-slate-800">{isOpen(g) ? <ChevronDown size={15} /> : <ChevronRight size={15} />} {g.name}</span>
+                                        <span className="ml-2 text-xs font-semibold text-slate-500">{g.items.length} item{g.items.length === 1 ? '' : 's'} · {g.inStock} in stock</span>
+                                        {g.uom && g.onHand > 0 && <span className="ml-2 text-xs font-semibold text-slate-600">· {fmtQty(g.onHand)} {UOM_LABEL[g.uom]} on hand</span>}
+                                        {g.reserved > 0 && <span className="ml-2 text-xs font-bold text-indigo-700">· {g.reserved} reserved{g.uom ? ` (${fmtQty(g.allocated)} ${UOM_LABEL[g.uom]}, ${fmtQty(g.free)} free)` : ''}</span>}
+                                        {g.onOrder > 0 && <span className="ml-2 text-xs font-bold text-sky-700">· {g.onOrder} on order</span>}
+                                    </td>
+                                </tr>
+                                {isOpen(g) && g.items.map(it => {
+                                    const u = UOM_LABEL[it.usage_uom];
+                                    return (
+                                        <tr key={it.id} className="border-t border-slate-100 align-top cursor-pointer hover:bg-slate-50" title="Open its stock history"
+                                            onClick={(e) => { if (!e.target.closest('button, a, input')) setLedgerItem(it); }}>
+                                            <td className="px-2.5 py-2.5 text-xs font-semibold text-slate-600 w-24">{it.trim_type_name}</td>
+                                            <td className="px-2.5 py-2.5">
+                                                <span className="font-semibold text-slate-800">{it.brand} · {it.code}</span>
+                                                {waitingChange.has(String(it.id)) && <span className="ml-2 inline-flex items-center gap-1 text-[11px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200"><Clock size={11} /> change waiting</span>}
+                                                {it.description && <span className="block text-xs text-slate-500">{it.description}</span>}
+                                                {it.is_dtm_quality && <span className="block mt-1 text-xs text-slate-600"><DtmChip /> DTM quality: no stock. Its real items are named {it.dtm_name} + the supplier's code.</span>}
+                                            </td>
+                                            <td className="px-2.5 py-2.5 text-xs text-slate-600">{specsText(it) || '—'}</td>
+                                            <td className="px-2.5 py-2.5 text-xs text-slate-600">{u} · {conversionText(it)}</td>
+                                            <td className="px-2.5 py-2.5 text-right tabular-nums">
+                                                <span className="font-bold text-slate-800">{fmtQty(it.on_hand)} {u}</span>
+                                                {Number(it.usage_per_purchase_uom) !== 1 && Number(it.on_hand) > 0 && <span className="block text-xs text-slate-400">≈ {inPurchaseUnits(it)}</span>}
+                                                {!it.has_movements && !it.is_dtm_quality && <span className="block text-[11px] font-bold text-amber-600">never moved</span>}
+                                            </td>
+                                            <td className={`px-2.5 py-2.5 text-right tabular-nums ${Number(it.allocated) > 0 ? 'font-semibold text-indigo-700' : 'text-slate-400'}`}>{Number(it.allocated) > 0 ? fmtQty(it.allocated) : '—'}</td>
+                                            <td className={`px-2.5 py-2.5 text-right tabular-nums font-semibold ${Number(it.free) < 0 ? 'text-rose-700' : ''}`}>{fmtQty(it.free ?? it.on_hand)}
+                                                {Number(it.on_hand) > 0 && !it.needed && !it.is_dtm_quality && <span className="block text-[11px] font-semibold text-amber-700">no order needs it</span>}</td>
+                                            <td className={`px-2.5 py-2.5 text-right tabular-nums ${Number(it.on_order) > 0 ? 'font-semibold text-sky-700' : 'text-slate-400'}`}>{Number(it.on_order) > 0 ? <>{fmtQty(it.on_order)}<span className="block text-[11px] font-normal text-slate-500">{it.on_order_pos} PO{it.on_order_pos === 1 ? '' : 's'}</span></> : '—'}</td>
+                                            <td className="px-2.5 py-2.5 text-xs text-slate-600 whitespace-nowrap">{it.last_in ? fmtDate(it.last_in) : '—'}</td>
+                                            <td className="px-2.5 py-2.5 text-xs text-slate-600 whitespace-nowrap">{it.last_issue ? fmtDate(it.last_issue) : Number(it.on_hand) > 0 ? <span className="text-amber-700">never</span> : '—'}</td>
+                                            <td className="px-2.5 py-2.5"><ActiveBadge active={it.is_active} /></td>
+                                            <td className="px-2.5 py-2.5 text-right whitespace-nowrap">
+                                                <button type="button" onClick={() => setLedgerItem(it)} className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100" aria-label={`Stock history of ${it.brand} ${it.code}`}><History size={15} /></button>
+                                                {(perms.trims || perms.trimRequest) && <button type="button" onClick={() => { setFormError(''); setEditing({ ...it, trim_type_id: String(it.trim_type_id), description: it.description || '', note: '' }); }}
+                                                    disabled={requestMode && waitingChange.has(String(it.id))} title={requestMode ? (waitingChange.has(String(it.id)) ? 'A change is already waiting for approval' : 'Request a change') : 'Edit'}
+                                                    className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100 disabled:opacity-40" aria-label={`${requestMode ? 'Request a change to' : 'Edit'} ${it.brand} ${it.code}`}><Pencil size={15} /></button>}
+                                                {canAdd && <button type="button" onClick={() => startCopy(it)} className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100" aria-label={`Copy ${it.brand} ${it.code} into a new item`} title="Copy into a new item"><Copy size={15} /></button>}
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        ))}
+                        {shown.length > 0 && (
+                            // Units differ per item, so the total counts items.
+                            <tfoot className="sticky bottom-0 border-t-2 border-slate-200 bg-slate-50 text-xs font-bold text-slate-600">
+                                <tr><td colSpan={COLS} className="px-3 py-2.5">Total · {shown.length} item{shown.length === 1 ? '' : 's'} in {groups.length} type{groups.length === 1 ? '' : 's'}{view !== 'ALL' ? ` (of ${searched.length})` : ''} · <span className="text-emerald-700">{shown.filter(VIEWS[1].test).length} in stock</span> · {shown.filter(VIEWS[2].test).length} zero stock · <span className="text-indigo-700">{shown.filter(VIEWS[3].test).length} reserved</span> · <span className="text-sky-700">{shown.filter(VIEWS[5].test).length} on order</span> · <span className="text-amber-700">{shown.filter(VIEWS[4].test).length} no order needs it</span></td></tr>
+                            </tfoot>
+                        )}
+                    </table>
                 </div>
             )}
 
@@ -460,7 +522,8 @@ function LedgerModal({ item, canAdjust, onClose, onChanged }) {
     return (
         <Modal title={`${item.brand} · ${item.code} — stock history`} onClose={onClose}>
             <div className="space-y-4 w-[min(760px,88vw)]">
-                {data && <p className="text-sm text-slate-600">On hand: <span className="font-black text-slate-900">{fmtQty(data.item.on_hand)} {unit}</span></p>}
+                {data && <p className="text-sm text-slate-600">On hand: <span className="font-black text-slate-900">{fmtQty(data.item.on_hand)} {unit}</span>
+                    {!item.is_dtm_quality && <Link to={`/v3/planning/position/TRIM/${item.id}`} className="ml-3 text-xs font-semibold text-indigo-700 hover:underline">Orders needing it · allocate →</Link>}</p>}
                 {canAdjust && data?.movements?.length > 0 && (
                     <div className="border border-slate-200 rounded-lg p-3 space-y-2">
                         <p className="text-xs font-bold text-slate-600">Adjustment (count correction, damage …)</p>
