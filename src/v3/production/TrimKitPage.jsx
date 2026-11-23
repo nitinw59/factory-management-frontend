@@ -26,7 +26,7 @@ import { apiError, mastersApi } from '../api/mastersApi';
 import { useV3Live } from '../live';
 import { Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, Loading } from '../components/ui';
 import { loadLetterhead } from '../components/letterhead';
-import { KIT_STATUS, ACTION, SHORT_REASON, COUNT_ISSUE, qty, handout, groupKitLines, spread, isOver, unitsOwedOf } from './trimKitShared';
+import { KIT_STATUS, ACTION, SHORT_REASON, COUNT_ISSUE, qty, handout, groupKitLines, spread, isOver, unitsOwedOf, byTrimType } from './trimKitShared';
 import { exportPickList, exportKitBill } from './kitPrint';
 import KitLabelsPanel from './KitLabelsPanel';
 
@@ -121,9 +121,10 @@ function KitView({ id }) {
     const legacy = S === 'READY' && picked.length === 0 && !(LB && LB.picked > 0);   // made ready before picking existed: counted against what it owes
     const toCount = legacy ? open : picked;
     const pendingExtra = (k.extra_requests || []).filter(r => r.status === 'PENDING');
-    const rows = groupKitLines(k.lines);           // one row per item (order + over-cut)
-    const openRows = groupKitLines(open);           // what is still owed, per item
-    const countRows = groupKitLines(toCount);       // what the loader counts, per item
+    // One row per item; all in the pick list's order — trim type, then line no. (23 Nov 2026).
+    const rows = byTrimType(groupKitLines(k.lines));           // one row per item (order + over-cut)
+    const openRows = byTrimType(groupKitLines(open));           // what is still owed, per item
+    const countRows = byTrimType(groupKitLines(toCount));       // what the loader counts, per item
     const BC = k.bom_change;   // the order's BOM changed after the store started on the kit (25 Oct 2026)
     const remadeAt = k.history.find(h => h.action === 'REMADE')?.created_at;
 
@@ -373,7 +374,7 @@ function KitView({ id }) {
                         <p className="text-sm text-slate-600">Enter what you <b>physically put in the kit</b>. Less than owed needs a reason — damaged and count short adjust the stock; the line waits in Pending to fulfil. The kit goes ready with what is in it.</p>
                         <div className="overflow-x-auto border border-slate-200 rounded-lg">
                             <table className="w-full text-sm">
-                                <thead className="bg-slate-50 text-xs font-bold text-slate-500 uppercase"><tr><th className="px-2 py-1.5 text-left">Item</th><th className="px-2 py-1.5 text-right">Owed (order + over-cut)</th><th className="px-2 py-1.5 text-right">In stock</th><th className="px-2 py-1.5 text-right">Put in</th><th className="px-2 py-1.5 text-left">If less — why</th></tr></thead>
+                                <thead className="bg-slate-50 text-xs font-bold text-slate-500 uppercase"><tr><th className="px-2 py-1.5 text-center w-8">#</th><th className="px-2 py-1.5 text-left">Trim type</th><th className="px-2 py-1.5 text-left">Item</th><th className="px-2 py-1.5 text-right">Owed (order + over-cut)</th><th className="px-2 py-1.5 text-right">In stock</th><th className="px-2 py-1.5 text-right">Put in</th><th className="px-2 py-1.5 text-left">If less — why</th></tr></thead>
                                 <tbody>{openRows.map(g => {
                                     const r = pick.rows.get(g.key);
                                     const sh = pickShort(g, r);
@@ -381,6 +382,8 @@ function KitView({ id }) {
                                     const ov = g.lines.filter(isOver).reduce((a, l) => a + l.remaining, 0);
                                     return (
                                         <tr key={g.key} className={`border-t border-slate-100 align-top ${sh ? 'bg-amber-50/60' : ''}`}>
+                                            <td className="px-2 py-1.5 text-center text-xs text-slate-500 tabular-nums">{g.line_no}</td>
+                                            <td className="px-2 py-1.5 text-xs font-semibold text-slate-600 whitespace-nowrap">{g.type_name || '—'}</td>
                                             <td className="px-2 py-1.5"><span className="font-semibold text-slate-800">{g.label}</span>{g.extra && <span className="block text-[11px] text-violet-700">extra line · free stock</span>}{ov > 0 && <span className="block text-[11px] text-sky-700">incl. over-cut {qty(ov, g.uom)} {g.uom} (free stock)</span>}</td>
                                             <td className="px-2 py-1.5 text-right tabular-nums whitespace-nowrap">{g.in_units ? `${g.units_owed} ${g.purchase_uom}` : `${qty(g.remaining, g.uom)} ${g.uom}`}</td>
                                             <td className="px-2 py-1.5 text-right tabular-nums whitespace-nowrap text-slate-600">{qty(g.stock_on_hand, g.uom)} {g.uom}{g.stock_on_hand <= 0 && <span className="block text-[11px] font-bold text-rose-700">not in store</span>}</td>
@@ -395,14 +398,14 @@ function KitView({ id }) {
                                 })}
                                 {LB && LB.remaining > 0 && (
                                     <tr className="border-t border-slate-100 align-top bg-indigo-50/40">
-                                        <td className="px-2 py-1.5"><span className="font-semibold text-slate-800">Garment barcode labels</span><span className="block text-[11px] text-indigo-700">what is printed goes in — print the rest on the kit</span></td>
+                                        <td className="px-2 py-1.5" colSpan={3}><span className="font-semibold text-slate-800">Garment barcode labels</span><span className="block text-[11px] text-indigo-700">what is printed goes in — print the rest on the kit</span></td>
                                         <td className="px-2 py-1.5 text-right tabular-nums whitespace-nowrap">{LB.remaining} pcs</td>
                                         <td className="px-2 py-1.5 text-right tabular-nums whitespace-nowrap text-slate-600">{LB.printed} printed</td>
                                         <td className="px-2 py-1.5 text-right font-bold tabular-nums">{LB.available} <span className="text-xs font-normal text-slate-500">pcs</span></td>
                                         <td className="px-2 py-1.5 text-xs">{LB.available < LB.remaining ? <span className="text-amber-800">{LB.remaining - LB.available} not printed yet — they follow</span> : ''}</td>
                                     </tr>
                                 )}
-                                <tr className="border-t-2 border-slate-200 bg-slate-50 text-xs font-bold"><td className="px-2 py-1.5" colSpan={3}>{openRows.length + (LB && LB.remaining > 0 ? 1 : 0)} item(s)</td>
+                                <tr className="border-t-2 border-slate-200 bg-slate-50 text-xs font-bold"><td className="px-2 py-1.5" colSpan={5}>{openRows.length + (LB && LB.remaining > 0 ? 1 : 0)} item(s)</td>
                                     <td className="px-2 py-1.5 text-right">{openRows.filter(g => Number(pick.rows.get(g.key).v || 0) > 0).length} going in</td>
                                     <td className="px-2 py-1.5 text-amber-800">{openRows.filter(g => pickShort(g, pick.rows.get(g.key))).length} short → pending to fulfil</td></tr>
                                 </tbody>

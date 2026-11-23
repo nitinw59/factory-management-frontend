@@ -26,6 +26,10 @@ const PART_RANK = { ORDER: 0, OVER_FREE: 1, OVER_APPROVAL: 2 };
 const r3 = (n) => Math.round(Number(n) * 1000) / 1000;
 export const isOver = (l) => l.part === 'OVER_FREE' || l.part === 'OVER_APPROVAL';
 export const unitsOwedOf = (l) => Math.ceil(l.remaining / l.factor - 1e-9);
+// The order a kit's items are shown and printed in (23 Nov 2026, owner: "trim kit pdf and put in the kit must match items
+// sequence"): trim type A–Z, then kit line no. Used by the pick list PDF and every list on the kit page.
+export const byTrimType = (groups) => [...groups].sort((a, b) => String(a.type_name || '~').localeCompare(String(b.type_name || '~')) || a.line_no - b.line_no);
+
 export function groupKitLines(lines) {
     const groups = new Map();
     for (const l of lines) {

@@ -4,7 +4,7 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { drawPdfLetterhead } from '../components/letterhead';
-import { groupKitLines, isOver, unitsOwedOf } from './trimKitShared';
+import { groupKitLines, isOver, unitsOwedOf, byTrimType } from './trimKitShared';
 
 const num = (v, d = 3) => (v == null ? '' : Number(v).toLocaleString('en-IN', { maximumFractionDigits: d }));
 const money = (v) => (v == null ? '—' : `₹${Number(v).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
@@ -54,8 +54,7 @@ export function exportPickList(k, lh) {
     const amt = (g, q, units) => (g.in_units ? `${units} ${g.purchase_uom} (${num(q)} ${g.uom})` : `${num(q)} ${g.uom}`);
     // 22 Nov 2026 (owner, /v3/trim-kits/33): trim type column, so the store picks by type (thread, zipper, button …);
     // then "sort pick list by trim type": rows by type A–Z, within a type by kit line no. (# stays the kit line no.).
-    const groups = groupKitLines(k.lines.filter(l => l.remaining > 0))
-        .sort((a, b) => String(a.type_name || '~').localeCompare(String(b.type_name || '~')) || a.line_no - b.line_no);
+    const groups = byTrimType(groupKitLines(k.lines.filter(l => l.remaining > 0)));   // the same order as the kit page
     const types = new Set(groups.map(g => g.type_name).filter(Boolean));
     autoTable(doc, {
         startY: y,
