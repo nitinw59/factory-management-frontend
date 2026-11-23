@@ -52,8 +52,10 @@ export function exportPickList(k, lh) {
         doc.setTextColor(0); y += 7;
     }
     const amt = (g, q, units) => (g.in_units ? `${units} ${g.purchase_uom} (${num(q)} ${g.uom})` : `${num(q)} ${g.uom}`);
-    const groups = groupKitLines(k.lines.filter(l => l.remaining > 0));
-    // 22 Nov 2026 (owner, /v3/trim-kits/33): trim type column, so the store picks by type (thread, zipper, button …).
+    // 22 Nov 2026 (owner, /v3/trim-kits/33): trim type column, so the store picks by type (thread, zipper, button …);
+    // then "sort pick list by trim type": rows by type A–Z, within a type by kit line no. (# stays the kit line no.).
+    const groups = groupKitLines(k.lines.filter(l => l.remaining > 0))
+        .sort((a, b) => String(a.type_name || '~').localeCompare(String(b.type_name || '~')) || a.line_no - b.line_no);
     const types = new Set(groups.map(g => g.type_name).filter(Boolean));
     autoTable(doc, {
         startY: y,
