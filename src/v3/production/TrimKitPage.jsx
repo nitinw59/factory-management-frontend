@@ -25,6 +25,7 @@ import { ORDER_STATUS, KIT_STATE, ACTION, SHORT_REASON, COUNT_ISSUE, qty, handou
 import { exportPickList, exportKitBill } from './kitPrint';
 import KitLabelsPanel from './KitLabelsPanel';
 import KitReturns from './KitReturns';
+import ItemFilter, { itemMatcher } from './ItemFilter';
 
 const money = (n) => (n == null ? '—' : `₹${Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
 const r3 = (n) => Math.round(Number(n) * 1000) / 1000;
@@ -116,7 +117,11 @@ function OrderView({ id }) {
     // asked about the kit being prepared: "no fold that too") — every kit, the linked one (?kit=) and a new one included;
     // the linked kit is still highlighted and scrolled to.
     const [shown, setShown] = useState(() => new Set());
-    const isShown = (key) => shown.has(key);
+    const [fq, setFq] = useState('');           // item search (26 Nov 2026)
+    const [ftype, setFtype] = useState('');     // trim type filter
+    const filtering = Boolean(fq.trim() || ftype);
+    // a search or a trim type opens the tables, so what matches is in front
+    const isShown = (key) => shown.has(key) || (filtering && ['lines', 'missing'].includes(key));
     const toggle = (key) => setShown(s => { const n = new Set(s); if (n.has(key)) n.delete(key); else n.add(key); return n; });
     const kitRefs = useRef({});
     const load = useCallback(() => trimKitsApi.get(id).then(res => setK(res.data)).catch(err => setError(apiError(err, 'Failed to load the trim order.'))), [id]);
@@ -150,6 +155,8 @@ function OrderView({ id }) {
     const pendingExtra = (k.extra_requests || []).filter(r => r.status === 'PENDING');
     // One row per item; all in the pick list's order — issue stage (route order), trim type, line no. (26 Nov 2026).
     const rows = byStage(groupKitLines(k.lines));
+    const match = itemMatcher(fq, ftype);
+    const itemTypes = [...new Set(rows.map(g => g.type_name).filter(Boolean))].sort((a, b) => a.localeCompare(b));
     const toKitRows = byStage(groupKitLines(k.lines.filter(l => l.to_kit > 0 && !l.held)));   // owed and in no open kit
     const BC = k.bom_change;   // the order's BOM changed after the store started (25 Oct 2026)
     const remadeAt = k.history.find(h => h.action === 'REMADE')?.created_at;
@@ -168,6 +175,14 @@ function OrderView({ id }) {
     const causeText = (list) => [['stock', 'not in store'], ['res', 'not reserved'], ['free', k.kind === 'SAMPLE' ? 'no free stock' : 'no free stock for the over-cut']]
         .map(([c, t]) => { const n = list.filter(x => (x.cp.cause || 'stock') === c).length; return n ? `${n} ${t}` : ''; }).filter(Boolean).join(' · ');
     const missingText = causeText(missing);
+    // The reservation notice by what the store has to do (26 Nov 2026, owner: "this banner is confusing" — 20 items "go in the
+    // next kit" while 13 were in a kit already and 7 not in the store): in an open kit (it can't be marked ready or signed
+    // until reserved) · not in the store either · only waiting for the reservation.
+    const kitsHolding = (g) => kits.filter(t => KIT_OPEN.includes(t.status) && t.lines.some(kl => g.lines.some(l => l.id === kl.order_line_id)));
+    const resInKit = unreserved.filter(g => kitsHolding(g).length > 0);
+    const resNoStock = unreserved.filter(g => !resInKit.includes(g) && g.stock_on_hand <= 0);
+    const resWaiting = unreserved.filter(g => !resInKit.includes(g) && !resNoStock.includes(g));
+    const unresOfKit = (t) => unreserved.filter(g => t.lines.some(kl => g.lines.some(l => l.id === kl.order_line_id)));
     const canKit = perm.prepare && isOpen && (canNow.length > 0 || Boolean(LB && LB.available_for_kit > 0));
     const searchChangeItems = async (q) => {
         try { const x = await mastersApi.trimItems({ search: q || undefined, active: 'true' }); setChange(c => c && { ...c, items: x.data }); } catch (err) { setFormError(apiError(err, 'Failed.')); }
@@ -207,6 +222,12 @@ function OrderView({ id }) {
     const setStage = (key, on) => setEdit(e => { const m = new Map(e.rows); for (const g of e.groups) if (stageKey(g) === key) m.set(g.key, { ...m.get(g.key), on }); return { ...e, rows: m }; });
     const eStages = E ? (() => { const m = new Map(); for (const g of E.groups) { const key = stageKey(g); if (!m.has(key)) m.set(key, { key, name: stageName(g), rows: [] }); m.get(key).rows.push(g); } return [...m.values()]; })() : [];
     const isOn = (g) => Boolean(E?.rows.get(g.key)?.on);
+    // search + trim type in the kit editor (26 Nov 2026, owner: "add search and trim type filter in … Change TK3/…"): only
+    // narrows what is listed — hidden items keep their tick and amount; a stage's tick box acts on the items listed
+    const [ef, setEf] = [E ? { q: E.fq || '', type: E.ftype || '' } : { q: '', type: '' }, (patch) => setEdit(e => ({ ...e, ...patch }))];
+    const eFiltering = Boolean(ef.q.trim() || ef.type);
+    const eMatch = itemMatcher(ef.q, ef.type);
+    const setRowsOn = (list, on) => setEdit(e => { const m = new Map(e.rows); for (const g of list) m.set(g.key, { ...m.get(g.key), on }); return { ...e, rows: m }; });
     const eShort = (g, r) => r.on && Number(r.v || 0) > 0 && Number(r.v || 0) + 1e-9 < pickCaps(g).total;
     const eOver = (g, r) => r.on && Number(r.v || 0) > pickCaps(g).total + 1e-9;
     const eZero = E ? E.groups.filter(g => { const r = eRow(g); return r.on && !(Number(r.v || 0) > 0); }) : [];
@@ -241,9 +262,10 @@ function OrderView({ id }) {
     };
 
     const KitCard = (t) => {
-        const groups = kitGroups(t); const st = KIT_STATE[t.status] || KIT_STATE.PREPARING; const focused = focusKit === t.id;
+        const allGroups = kitGroups(t); const groups = filtering ? allGroups.filter(match) : allGroups;
+        const st = KIT_STATE[t.status] || KIT_STATE.PREPARING; const focused = focusKit === t.id;
         const h = k.handovers.find(x => x.id === t.handover_id);
-        const open = isShown(`kit-${t.id}`);
+        const open = isShown(`kit-${t.id}`) || (filtering && groups.length > 0);
         return (
             <div key={t.id} ref={el => { kitRefs.current[t.id] = el; }} className={`bg-white rounded-xl overflow-hidden ${t.status === 'PREPARING' ? `border-2 border-slate-800${focused ? ' ring-2 ring-indigo-300' : ''}` /* being prepared: dark border (owner, 26 Nov 2026) */
                 : `border ${focused ? 'border-indigo-400 ring-2 ring-indigo-200' : t.status === 'READY' ? 'border-emerald-300' : 'border-slate-200'}`}`}>
@@ -253,7 +275,7 @@ function OrderView({ id }) {
                     <span className="text-xl font-black tracking-tight text-slate-900">{t.kit_no}</span>
                     <span className={`text-[11px] font-black px-2 py-0.5 rounded border ${st.cls}`}>{st.label}</span>
                     <span className="text-sm text-slate-700">{t.stages?.length ? t.stages.join(', ') : 'no stage'} → <b>{isSample ? 'sampling' : t.goes_to || 'any line'}</b></span>
-                    <span className="text-xs text-slate-500">{groups.length} item{groups.length === 1 ? '' : 's'}{t.labels_qty ? ` + ${t.labels_qty} garment labels` : ''}</span>
+                    <span className="text-xs text-slate-500">{filtering ? <><b className={groups.length ? 'text-indigo-700' : ''}>{groups.length} of {allGroups.length}</b> items match</> : `${groups.length} item${groups.length === 1 ? '' : 's'}`}{t.labels_qty ? ` + ${t.labels_qty} garment labels` : ''}</span>
                     <span className="ml-auto text-xs text-slate-500">{t.status === 'READY' ? `ready ${when(t.ready_at)}${t.ready_by_name ? ` · ${t.ready_by_name}` : ''}`
                         : t.status === 'SIGNED' ? `signed ${when(t.signed_at)}${h?.signed_by_name ? ` · ${h.signed_by_name}` : ''}${h?.production_line_name ? ` · ${h.production_line_name}` : ''}`
                             : t.status === 'CANCELLED' ? `cancelled ${when(t.cancelled_at)}${t.cancelled_by_name ? ` · ${t.cancelled_by_name}` : ''}` : `made ${when(t.created_at)}${t.created_by_name ? ` · ${t.created_by_name}` : ''}`}</span>
@@ -261,6 +283,7 @@ function OrderView({ id }) {
                 {t.status === 'PREPARING' && t.sent_back_at && <div className="px-4 py-2 text-sm bg-rose-50 border-b border-rose-200 text-rose-900"><b>Sent back {when(t.sent_back_at)}:</b> {t.sent_back_reason} — correct the kit and mark it ready again.</div>}
                 {t.status === 'CANCELLED' && <p className="px-4 py-2 text-sm text-slate-600">Cancelled: {t.cancelled_reason} — what was in it went back to the shelf; the items stay owed on the trim order.</p>}
                 {t.notes && <p className="px-4 pt-2 text-xs text-slate-600"><b>Note:</b> {t.notes}</p>}
+                {KIT_OPEN.includes(t.status) && !isSample && unresOfKit(t).length > 0 && <p className="px-4 py-2 text-sm bg-rose-50 border-b border-rose-200 text-rose-900"><b>{unresOfKit(t).length} item{unresOfKit(t).length === 1 ? '' : 's'} not reserved for {k.order_no}</b> — reserve {unresOfKit(t).length === 1 ? 'it' : 'them'} on the <Link to={bomLink} className="font-bold underline">Order BOM</Link> before {t.status === 'READY' ? 'the line loader signs' : 'marking this kit ready'}.</p>}
                 {t.status !== 'CANCELLED' && open && (
                     <div className="overflow-x-auto">
                         <table className="w-full text-sm">
@@ -275,7 +298,7 @@ function OrderView({ id }) {
                                         <td className="px-3 py-1.5 text-right tabular-nums font-bold whitespace-nowrap">{g.in_units ? `${g.picked_units} ${g.purchase_uom} = ${qty(g.picked, g.uom)} ${g.uom}` : `${qty(g.picked, g.uom)} ${g.uom}`}</td>
                                     </tr>
                                 ))}
-                                {t.labels_qty > 0 && <tr className="border-t border-slate-100 bg-indigo-50/30"><td className="px-4 py-1.5 text-slate-500">L</td><td className="px-3 py-1.5 text-xs text-slate-500">—</td><td className="px-3 py-1.5 text-xs">Labels</td><td className="px-3 py-1.5 font-semibold text-slate-800">Garment barcode labels</td><td className="px-3 py-1.5 text-right tabular-nums font-bold">{t.labels_qty} pcs</td></tr>}
+                                {t.labels_qty > 0 && !filtering && <tr className="border-t border-slate-100 bg-indigo-50/30"><td className="px-4 py-1.5 text-slate-500">L</td><td className="px-3 py-1.5 text-xs text-slate-500">—</td><td className="px-3 py-1.5 text-xs">Labels</td><td className="px-3 py-1.5 font-semibold text-slate-800">Garment barcode labels</td><td className="px-3 py-1.5 text-right tabular-nums font-bold">{t.labels_qty} pcs</td></tr>}
                                 <tr className="border-t-2 border-slate-200 bg-slate-50 text-xs font-bold text-slate-700"><td className="px-4 py-1.5" colSpan={4}>Total · {groups.length} item{groups.length === 1 ? '' : 's'}{t.labels_qty > 0 ? ' + garment labels' : ''} · {new Set(groups.map(stageKey)).size} stage(s)</td><td className="px-3 py-1.5 text-right">{groups.length + (t.labels_qty > 0 ? 1 : 0)} line(s)</td></tr>
                             </tbody>
                         </table>
@@ -345,6 +368,7 @@ function OrderView({ id }) {
                 {!isSample && perm.prepare && isOpen && <SecondaryButton onClick={closeOrder}><Ban size={14} /> {k.handovers.length ? 'Close trim order' : 'Cancel trim order'}</SecondaryButton>}
             </div>
             <ErrorBox text={error} />
+            <ItemFilter q={fq} setQ={setFq} type={ftype} setType={setFtype} types={itemTypes} shown={rows.filter(match).length} total={rows.length} />
 
             {/* Kits (26 Nov 2026): the bags the store prepares on this trim order — several can be ready at once */}
             <div className="mb-4">
@@ -364,10 +388,46 @@ function OrderView({ id }) {
             </div>
 
             {unreserved.length > 0 && isOpen && (
-                <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900 flex flex-wrap items-center gap-x-3 gap-y-1">
-                    <b>{unreserved.length} item{unreserved.length === 1 ? ' is' : 's are'} not reserved for {k.order_no}</b>
-                    <span>— {unreserved.length === 1 ? 'it waits' : 'they wait'} (the line loader's signing needs the reservation). Reserve on the Order BOM (Allocate) and {unreserved.length === 1 ? 'it goes' : 'they go'} in the next kit.</span>
-                    <Link to={bomLink} className="ml-auto font-bold text-rose-800 underline whitespace-nowrap">Order BOM — reserve →</Link>
+                <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 text-sm text-rose-950 overflow-hidden">
+                    <div className="px-4 py-3">
+                        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-1.5">
+                            <b className="text-base">Reserve on {k.order_no} — {unreserved.length} item{unreserved.length === 1 ? '' : 's'}</b>
+                            <span className="text-xs text-rose-800">the line loader can sign only what the order has reserved</span>
+                            <Link to={bomLink} className="ml-auto font-bold text-rose-800 underline whitespace-nowrap">Order BOM — reserve →</Link>
+                        </div>
+                        <ul className="space-y-1">
+                            {resInKit.length > 0 && <li>● <b>{resInKit.length} in kit {[...new Set(resInKit.flatMap(g => kitsHolding(g).map(t => t.kit_no)))].join(', ')}</b> — {resInKit.length === 1 ? 'it blocks' : 'they block'} the kit: it can't be marked ready or signed until {resInKit.length === 1 ? 'it is' : 'they are'} reserved.{resInKit.every(g => g.stock_on_hand > 0) ? ` Stock is in the store for ${resInKit.length === 1 ? 'it' : `all ${resInKit.length}`}.` : ''}</li>}
+                            {resNoStock.length > 0 && <li>● <b>{resNoStock.length} not in the store either</b> — reserve {resNoStock.length === 1 ? 'it' : 'them'} when {resNoStock.length === 1 ? 'it arrives' : 'they arrive'} (see Not in a kit yet).</li>}
+                            {resWaiting.length > 0 && <li>● <b>{resWaiting.length} in the store, waiting only for the reservation</b> — reserve {resWaiting.length === 1 ? 'it' : 'them'} and {resWaiting.length === 1 ? 'it goes' : 'they go'} in the next kit.</li>}
+                        </ul>
+                        <button type="button" onClick={() => toggle('unres')} className="mt-1.5 text-xs font-bold text-rose-800 hover:underline">{isShown('unres') ? '▾ Hide' : '▸ Show'} the {unreserved.length} item{unreserved.length === 1 ? '' : 's'}</button>
+                    </div>
+                    {isShown('unres') && (
+                        <div className="overflow-x-auto bg-white border-t border-rose-200">
+                            <table className="w-full text-sm min-w-[900px]">
+                                <thead className="text-xs font-bold text-slate-500 uppercase tracking-wider bg-slate-50 text-right"><tr>
+                                    <th className="px-3 py-2 text-left">#</th><th className="px-3 py-2 text-left">Item</th><th className="px-3 py-2">Owed for the order</th><th className="px-3 py-2">Reserved</th><th className="px-3 py-2">Short by</th><th className="px-3 py-2">In store</th><th className="px-3 py-2 text-left">Where it is</th>
+                                </tr></thead>
+                                <tbody>{[...resInKit, ...resNoStock, ...resWaiting].map(g => {
+                                    const kh = kitsHolding(g);
+                                    return (
+                                        <tr key={g.key} className="border-t border-slate-100 text-right tabular-nums whitespace-nowrap">
+                                            <td className="px-3 py-1.5 text-left text-slate-500">{g.line_no}</td>
+                                            <td className="px-3 py-1.5 text-left whitespace-normal"><span className="font-semibold text-slate-800">{g.label}</span><span className="block text-xs text-slate-500">{g.type_name}</span></td>
+                                            <td className="px-3 py-1.5">{qty(orderOwed(g), g.uom)} {g.uom}</td>
+                                            <td className="px-3 py-1.5">{qty(reservedOf(g), g.uom)} {g.uom}</td>
+                                            <td className="px-3 py-1.5 font-bold text-rose-700">{qty(resGap(g, orderOwed(g)), g.uom)} {g.uom}</td>
+                                            <td className={`px-3 py-1.5 ${g.stock_on_hand > 0 ? '' : 'font-bold text-rose-700'}`}>{qty(g.stock_on_hand, g.uom)} {g.uom}</td>
+                                            <td className="px-3 py-1.5 text-left text-xs">{kh.length ? <b className="text-slate-800">in {kh.map(t => t.kit_no).join(', ')}</b> : g.stock_on_hand > 0 ? 'in the store — next kit' : <span className="text-rose-700 font-semibold">not in store</span>}</td>
+                                        </tr>
+                                    );
+                                })}</tbody>
+                                <tfoot className="bg-slate-50 border-t-2 border-slate-200 text-xs font-bold"><tr>
+                                    <td className="px-3 py-2" colSpan={7}>Total · {unreserved.length} item(s) to reserve — {[[resInKit.length, 'in a kit'], [resNoStock.length, 'not in store'], [resWaiting.length, 'in the store, for the next kit']].filter(([n]) => n).map(([n, t]) => `${n} ${t}`).join(' · ')}</td>
+                                </tr></tfoot>
+                            </table>
+                        </div>
+                    )}
                 </div>
             )}
             <button type="button" aria-expanded={isShown('lines')} onClick={() => toggle('lines')} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-2 text-left group">
@@ -386,7 +446,7 @@ function OrderView({ id }) {
                         <tr><th className="px-3 py-2 text-left">#</th><th className="px-3 py-2 text-left">Item</th><th className="px-3 py-2">For the order</th><th className="px-3 py-2">Over-cut</th><th className="px-3 py-2">Total</th><th className="px-3 py-2">Handed over</th><th className="px-3 py-2" title="In kits being prepared or ready">In kits</th><th className="px-3 py-2">Not in a kit yet</th><th className="px-3 py-2">In store</th><th className="px-3 py-2" title="What the order has reserved for this item — the line loader's signing needs it">Reserved for the order</th><th className="px-3 py-2 text-left">Last pick / count</th><th className="px-3 py-2" /></tr>
                     </thead>
                     <tbody>
-                        {rows.filter(g => !waitKeys.has(g.key)).flatMap((g, i, arr) => (i === 0 || stageKey(arr[i - 1]) !== stageKey(g)
+                        {rows.filter(g => !waitKeys.has(g.key) && match(g)).flatMap((g, i, arr) => (i === 0 || stageKey(arr[i - 1]) !== stageKey(g)
                             ? [{ key: `__st-${stageKey(g)}`, stageHead: stageName(g), n: arr.filter(x => stageKey(x) === stageKey(g)).length }, g] : [g]))
                             .map(g => {
                                 if (g.stageHead) return (
@@ -441,7 +501,7 @@ function OrderView({ id }) {
                                     </tr>
                                 );
                             })}
-                        {LB && (
+                        {LB && !filtering && (
                             <tr className="border-t border-slate-100 text-right tabular-nums align-top bg-indigo-50/30">
                                 <td className="px-3 py-2 text-left">L</td>
                                 <td className="px-3 py-2 text-left"><span className="font-semibold text-slate-800">Garment barcode labels</span>
@@ -460,7 +520,7 @@ function OrderView({ id }) {
                             </tr>
                         )}
                         <tr className="border-t-2 border-slate-200 bg-slate-50 text-xs font-bold text-slate-700 text-right">
-                            <td className="px-3 py-2 text-left" colSpan={2}>Total · {rows.length - waitKeys.size + (LB ? 1 : 0)} item(s){rows.some(g => g.over_qty > 0) ? ` · ${rows.filter(g => g.over_qty > 0).length} with over-cut` : ''}{waitKeys.size ? ` · ${waitKeys.size} more below, not in a kit yet` : ''}</td>
+                            <td className="px-3 py-2 text-left" colSpan={2}>{filtering ? <span className="text-indigo-700">Showing {rows.filter(g => !waitKeys.has(g.key) && match(g)).length} matching · </span> : null}Total · {rows.length - waitKeys.size + (LB ? 1 : 0)} item(s){rows.some(g => g.over_qty > 0) ? ` · ${rows.filter(g => g.over_qty > 0).length} with over-cut` : ''}{waitKeys.size ? ` · ${waitKeys.size} more below, not in a kit yet` : ''}</td>
                             <td className="px-3 py-2" colSpan={4}>{rows.filter(g => g.issued > 0).length} handed (fully or in part)</td>
                             <td className="px-3 py-2 text-emerald-800">{rows.filter(g => g.in_kits > 0).length + (LB && LB.picked > 0 ? 1 : 0)} in kits</td>
                             <td className="px-3 py-2 text-amber-800">{toKitRows.length + (LB && LB.remaining - LB.picked > 0 ? 1 : 0)} not in a kit yet</td>
@@ -484,7 +544,8 @@ function OrderView({ id }) {
                         <thead className="text-xs font-bold text-slate-500 uppercase tracking-wider bg-slate-50 text-right"><tr>
                             <th className="px-3 py-2 text-left">#</th><th className="px-3 py-2 text-left">Stage</th><th className="px-3 py-2 text-left">Item</th><th className="px-3 py-2">Not in a kit</th><th className="px-3 py-2">Waits</th>
                             <th className="px-3 py-2 text-left">Why</th><th className="px-3 py-2">In store</th><th className="px-3 py-2">Reserved</th><th className="px-3 py-2 text-left">On order</th><th className="px-3 py-2" /></tr></thead>
-                        <tbody>{missing.map(({ g, cp, waitQty }) => {
+                        <tbody>{filtering && !missing.some(x => match(x.g)) && <tr><td colSpan={10} className="px-4 py-4 text-center text-sm text-slate-400">No item here matches.</td></tr>}
+                            {missing.filter(x => match(x.g)).map(({ g, cp, waitQty }) => {
                             const req = pendingExtra.find(r => g.lines.some(l => l.id === r.replaces_line_id));
                             const head = extraFor(g);
                             const unit = g.in_units ? g.purchase_uom : g.uom; const cause = cp.cause || 'stock';
@@ -673,18 +734,28 @@ function OrderView({ id }) {
                                 <button type="button" onClick={() => eStages.forEach(st => setStage(st.key, false))} className="text-xs font-bold text-indigo-700 hover:underline">none</button>
                             </div>
                         )}
+                        {E.groups.length > 0 && (
+                            <div>
+                                <ItemFilter q={ef.q} setQ={(v) => setEf({ fq: v })} type={ef.type} setType={(v) => setEf({ ftype: v })}
+                                    types={[...new Set(E.groups.map(g => g.type_name).filter(Boolean))].sort((a, b) => a.localeCompare(b))} shown={E.groups.filter(eMatch).length} total={E.groups.length} />
+                                {eFiltering && <p className="-mt-2 text-xs text-slate-500">Only the list is narrowed — the items not shown keep their tick and amount and are saved as they are.</p>}
+                            </div>
+                        )}
                         {E.groups.length > 0 ? (
                             <div className="overflow-x-auto border border-slate-200 rounded-lg">
                                 <table className="w-full text-sm">
                                     <thead className="bg-slate-50 text-xs font-bold text-slate-500 uppercase"><tr><th className="px-2 py-1.5 w-8" title="In this kit" /><th className="px-2 py-1.5 text-center w-8">#</th><th className="px-2 py-1.5 text-left">Trim type</th><th className="px-2 py-1.5 text-left">Item</th><th className="px-2 py-1.5 text-right">Not in a kit</th><th className="px-2 py-1.5 text-right">In stock</th><th className="px-2 py-1.5 text-right">Reserved</th><th className="px-2 py-1.5 text-right">Can go in now</th><th className="px-2 py-1.5 text-right">Put in</th><th className="px-2 py-1.5 text-left">If less — why</th></tr></thead>
-                                    <tbody>{eStages.map(st => {
-                                        const n = st.rows.filter(isOn).length; const all = n === st.rows.length;
+                                    <tbody>{eFiltering && !E.groups.some(eMatch) && <tr><td colSpan={10} className="px-3 py-4 text-center text-sm text-slate-400">No item matches.</td></tr>}
+                                    {eStages.map(st => {
+                                        const vis = st.rows.filter(eMatch); if (!vis.length) return null;
+                                        const n = vis.filter(isOn).length; const all = n === vis.length;
+                                        const nAll = st.rows.filter(isOn).length;
                                         return [
                                             <tr key={`st-${st.key}`} className="border-t-2 border-slate-200 bg-slate-100/80">
-                                                <td className="px-2 py-1.5 text-center"><input type="checkbox" checked={all} ref={el => { if (el) el.indeterminate = n > 0 && !all; }} onChange={() => setStage(st.key, !all)} aria-label={`Put ${st.name} in this kit`} /></td>
-                                                <td className="px-2 py-1.5 text-xs font-black uppercase tracking-wider text-slate-700" colSpan={9}>{st.name} <span className="ml-2 font-normal normal-case tracking-normal text-slate-500">{n} of {st.rows.length} item{st.rows.length === 1 ? '' : 's'} in this kit{n < st.rows.length ? ` · ${st.rows.length - n} for another kit` : ''}</span></td>
+                                                <td className="px-2 py-1.5 text-center"><input type="checkbox" checked={all} ref={el => { if (el) el.indeterminate = n > 0 && !all; }} onChange={() => (eFiltering ? setRowsOn(vis, !all) : setStage(st.key, !all))} aria-label={`Put ${st.name} in this kit`} /></td>
+                                                <td className="px-2 py-1.5 text-xs font-black uppercase tracking-wider text-slate-700" colSpan={9}>{st.name} <span className="ml-2 font-normal normal-case tracking-normal text-slate-500">{nAll} of {st.rows.length} item{st.rows.length === 1 ? '' : 's'} in this kit{nAll < st.rows.length ? ` · ${st.rows.length - nAll} for another kit` : ''}{eFiltering ? ` · ${vis.length} shown` : ''}</span></td>
                                             </tr>,
-                                            ...st.rows.map(g => {
+                                            ...vis.map(g => {
                                                 const r = eRow(g);
                                                 const cp = pickCaps(g);
                                                 const sh = eShort(g, r); const over = eOver(g, r); const zero = r.on && !(Number(r.v || 0) > 0);
@@ -719,7 +790,7 @@ function OrderView({ id }) {
                                             }),
                                         ];
                                     })}
-                                    <tr className="border-t-2 border-slate-200 bg-slate-50 text-xs font-bold"><td className="px-2 py-1.5" colSpan={8}>Total · {E.groups.length} item(s) can go in now · {eSkipped} for another kit{E.waiting.length ? ` · ${E.waiting.length} waiting (not listed)` : ''}</td>
+                                    <tr className="border-t-2 border-slate-200 bg-slate-50 text-xs font-bold"><td className="px-2 py-1.5" colSpan={8}>{eFiltering ? <span className="text-indigo-700">Showing {E.groups.filter(eMatch).length} · </span> : null}Total · {E.groups.length} item(s) can go in now · {eSkipped} for another kit{E.waiting.length ? ` · ${E.waiting.length} waiting (not listed)` : ''}</td>
                                         <td className="px-2 py-1.5 text-right text-emerald-700">{eGoing + (eLabels > 0 ? 1 : 0)} in this kit</td>
                                         <td className="px-2 py-1.5 text-amber-800">{E.groups.filter(g => eShort(g, eRow(g))).length ? `${E.groups.filter(g => eShort(g, eRow(g))).length} less than could go in` : ''}</td></tr>
                                     </tbody>

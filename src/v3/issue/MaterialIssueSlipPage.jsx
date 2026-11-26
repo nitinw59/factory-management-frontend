@@ -8,6 +8,7 @@ import { materialIssueApi } from '../api/materialIssueApi';
 import { trimKitsApi } from '../api/trimKitsApi';
 import { apiError } from '../api/mastersApi';
 import { PrimaryButton, SecondaryButton, ErrorBox, Loading, Field, inputCls } from '../components/ui';
+import ItemFilter, { itemMatcher } from '../production/ItemFilter';
 import { fmtDate } from '../salesOrders/SalesOrderStatusBadge';
 import { loadLetterhead } from '../components/letterhead';
 import { useWedgeScanner, feedback } from '../production/scanShared';
@@ -27,6 +28,8 @@ export default function MaterialIssueSlipPage() {
     const [decide, setDecide] = useState({});           // roll id → { status, reason }
     const [acceptLots, setAcceptLots] = useState(false);
     const [scanMsg, setScanMsg] = useState(null);
+    const [fq, setFq] = useState('');        // trim slip: item search + trim type (26 Nov 2026, owner: "add search and trim type filter in … /v3/trim-orders/slips/264")
+    const [ftype, setFtype] = useState('');
     const load = useCallback(() => (trimPath ? trimKitsApi.slip(id) : materialIssueApi.issue(id)).then(res => setS(res.data)).catch(err => setError(apiError(err, 'Failed to load the slip.'))), [id, trimPath]);
     useEffect(() => { load(); if (!trimPath) materialIssueApi.permissions().then(res => setPerm(res.data)).catch(() => {}); }, [load, trimPath]);
     const pending = useMemo(() => (s?.planned || []).filter(p => p.status === 'PENDING'), [s]);
@@ -51,7 +54,10 @@ export default function MaterialIssueSlipPage() {
             load();
         } finally { setBusy(false); }
     };
-    const rows = slipRows(s);
+    const allRows = slipRows(s);
+    const tMatch = itemMatcher(fq, ftype);
+    const tFiltering = isTrim && Boolean(fq.trim() || ftype);
+    const rows = tFiltering ? allRows.filter(tMatch) : allRows;   // a trim slip's list narrowed by the search / trim type
     const live = rows.filter(r => r.status !== 'REJECTED');
     // Fabric slips (23 Nov 2026): by fabric type (shell, pocketing …), each fabric inside it — was by garment colour (8 Nov).
     const types = isTrim ? null : groupByType(s, rows);
@@ -134,9 +140,10 @@ export default function MaterialIssueSlipPage() {
                     </table>
                 </div>
             )}
+            {isTrim && <div className="mt-2"><ItemFilter q={fq} setQ={setFq} type={ftype} setType={setFtype} types={[...new Set(allRows.map(r => r.type_name).filter(Boolean))].sort((a, b) => a.localeCompare(b))} shown={rows.length} total={allRows.length} /></div>}
             <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto mb-3 mt-2">
                 <table className="w-full text-sm min-w-[720px]">
-                    <thead className="bg-slate-50 text-left text-xs font-bold text-slate-500 uppercase tracking-wider"><tr>{isTrim ? <th className="px-3 py-2">Item</th> : <><th className="px-3 py-2">Roll</th><th className="px-3 py-2">Lot</th><th className="px-3 py-2">Location</th></>}<th className="px-3 py-2 text-right">Quantity</th>{showNote && <th className="px-3 py-2">{canReceive ? 'Decision' : 'Note'}</th>}</tr></thead>
+                    <thead className="bg-slate-50 text-left text-xs font-bold text-slate-500 uppercase tracking-wider"><tr>{isTrim ? <><th className="px-3 py-2 w-10">#</th><th className="px-3 py-2">Trim type</th><th className="px-3 py-2">Item</th></> : <><th className="px-3 py-2">Roll</th><th className="px-3 py-2">Lot</th><th className="px-3 py-2">Location</th></>}<th className="px-3 py-2 text-right">Quantity</th>{showNote && <th className="px-3 py-2">{canReceive ? 'Decision' : 'Note'}</th>}</tr></thead>
                     {(groups || [{ key: 'all', rows }]).map(g => <tbody key={g.key}>
                         {groups && g.firstOfType && (
                             <tr className="border-t-2 border-slate-300 bg-slate-200/70">
@@ -153,7 +160,7 @@ export default function MaterialIssueSlipPage() {
                             const dd = p && decide[p.roll_id];
                             return (
                                 <tr key={r.code || i} className={`border-t border-slate-100 ${dd?.status === 'RECEIVED' ? 'bg-emerald-50/50' : dd?.status === 'REJECTED' ? 'bg-rose-50/50' : ''}`}>
-                                    {isTrim ? <td className="px-3 py-2">{r.label}</td>
+                                    {isTrim ? <><td className="px-3 py-2 text-xs tabular-nums text-slate-500">{r.line_no}</td><td className="px-3 py-2 text-xs whitespace-nowrap">{r.type_name || '—'}</td><td className="px-3 py-2">{r.label}</td></>
                                         : <><td className="px-3 py-2 font-semibold">{r.roll_no || '—'}</td><td className="px-3 py-2">{r.dye_lot || <span className="text-amber-700">not recorded</span>}</td><td className="px-3 py-2">{r.location || '—'}</td></>}
                                     <td className="px-3 py-2 text-right tabular-nums font-bold whitespace-nowrap">{fmtN(r.qty)} {r.uom}{r.returned_qty > 0 && <span className="block text-[11px] font-normal text-slate-500">{fmtN(r.returned_qty)} returned</span>}</td>
                                     {showNote && <td className="px-3 py-2">
@@ -177,7 +184,8 @@ export default function MaterialIssueSlipPage() {
                             return <tr className="border-t border-slate-300 bg-slate-100 text-xs font-black text-slate-800"><td className="px-3 py-1.5" colSpan={3}>{g.type.label} · {tl.length} roll{tl.length === 1 ? '' : 's'}</td><td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">{unitsText(tl)}</td>{showNote && <td />}</tr>;
                         })()}
                     </tbody>)}
-                    <tfoot className="bg-slate-50 border-t-2 border-slate-200 font-black"><tr><td className="px-3 py-2" colSpan={isTrim ? 1 : 3}>Total · {live.length} {isTrim ? 'item' : 'roll'}{live.length === 1 ? '' : 's'}{rows.length > live.length ? ` (${rows.length - live.length} refused, not counted)` : ''}</td><td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{unitsText(live)}</td>{showNote && <td />}</tr></tfoot>
+                    {tFiltering && !rows.length && <tbody><tr><td colSpan={showNote ? 5 : 4} className="px-3 py-4 text-center text-sm text-slate-400">No item on this slip matches.</td></tr></tbody>}
+                    <tfoot className="bg-slate-50 border-t-2 border-slate-200 font-black"><tr><td className="px-3 py-2" colSpan={3}>{tFiltering ? <span className="text-indigo-700">Showing {rows.length} of {allRows.length} · </span> : null}Total · {live.length} {isTrim ? 'item' : 'roll'}{live.length === 1 ? '' : 's'}{rows.length > live.length ? ` (${rows.length - live.length} refused, not counted)` : ''}</td><td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{unitsText(live)}</td>{showNote && <td />}</tr></tfoot>
                 </table>
             </div>
             {canReceive && (

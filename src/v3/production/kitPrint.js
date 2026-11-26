@@ -88,6 +88,20 @@ export function exportPickList(k, lh, kit = null) {
         return short > 1e-9 ? `${put} of ${num(o.qty + ov.qty + short)} ${g.uom}` : put;
     };
     const noteText = (x) => x.g.lines.filter(l => Number(l.kit_pick?.short) > 1e-9).map(l => `${x.g.lines.length > 1 ? (freeStockLine(l) ? 'over-cut: ' : 'order: ') : ''}${num(l.kit_pick.short)} ${l.uom} short — ${(SHORT_REASON[l.kit_pick.reason] || l.kit_pick.reason || '').toLowerCase()}${l.kit_pick.note ? ` (${l.kit_pick.note})` : ''}${l.kit_pick.adjusted ? ` · stock adjusted -${num(l.kit_pick.adjusted)}` : ''}`).join('\n');
+    // Shortfall in the cell (26 Nov 2026, owner on TO3/2026-27/0034 Bone Lips: over-cut owed but no free stock → "atleast print
+    // on pdf with warning inside cell shortfall"): under the order / over-cut amount, what the trim order still owes for the
+    // item that can't go in a kit now, with why — read from the trim order (outside every open kit). Not on a signed kit.
+    const SHORT_WHY = { stock: 'not in store', res: 'not reserved', free: 'no free stock' };
+    const showShort = !kit || ['PREPARING', 'READY'].includes(kit.status);
+    const shortOf = (g, free) => {
+        if (!showShort || g.extra) return null;
+        const ls = k.lines.filter(l => l.item_id === g.item_id && l.part !== 'EXTRA' && freeStockLine(l) === free && l.to_kit > 1e-9 && !l.held);
+        const q = Math.round(ls.reduce((a, l) => a + Math.max(0, l.to_kit - (Number(l.can_now) || 0)), 0) * 1000) / 1000;
+        if (!(q > 1e-9)) return null;
+        const why = ls.find(l => l.to_kit - (Number(l.can_now) || 0) > 1e-9)?.wait_why || 'stock';
+        return `SHORT ${num(q)} ${g.uom} — ${SHORT_WHY[why] || why}`;
+    };
+    const shortCells = new Map();   // body row → columns with a shortfall (printed in red)
     const labelsRow = kit && kit.labels_qty > 0 ? [[{ content: 'GARMENT BARCODE LABELS', colSpan: 9, styles: { fillColor: [224, 231, 255], fontStyle: 'bold', textColor: 30, halign: 'left' } }],
         ['L', 'Labels', 'Garment barcode labels (printed by the store)', `${kit.labels_qty} pcs`, '—', `${kit.labels_qty} pcs`, '', done ? `${kit.labels_qty} pcs` : '', '']] : [];
     autoTable(doc, {
@@ -96,14 +110,16 @@ export function exportPickList(k, lh, kit = null) {
         // a header row per issue stage (26 Nov 2026) — the store picks one stage's section at a time
         body: [...rows.flatMap((x, i) => {
             const g = x.g; const o = part(x, false); const ov = part(x, true);
+            const so = shortOf(g, false); const sv = shortOf(g, true);
             const row = [g.line_no, g.type_name || '—', `${g.label}${g.extra ? ' (extra line)' : ''}${!kit && x.cp.cause ? ' — rest waits' : ''}`,
-                o.qty > 0 ? amt(g, o.qty, o.units) : '—', ov.qty > 0 ? amt(g, ov.qty, ov.units) : '—', amt(g, o.qty + ov.qty, o.units + ov.units),
+                o.qty > 0 ? `${amt(g, o.qty, o.units)}${so ? `\n${so}` : ''}` : so || '—', ov.qty > 0 ? `${amt(g, ov.qty, ov.units)}${sv ? `\n${sv}` : ''}` : sv || '—', amt(g, o.qty + ov.qty, o.units + ov.units),
                 `${num(g.stock_on_hand)} ${g.uom}`, done ? pickedText(x) : '', done ? noteText(x) : ''];
+            if (so || sv) shortCells.set(row, new Set([...(so ? [3] : []), ...(sv ? [4] : [])]));
             if (i > 0 && stageKey(rows[i - 1].g) === stageKey(g)) return [row];
             const n = rows.filter(z => stageKey(z.g) === stageKey(g)).length;
             return [[{ content: `${stageName(g).toUpperCase()} — ${n} item(s)`, colSpan: 9, styles: { fillColor: [226, 232, 240], fontStyle: 'bold', textColor: 30, halign: 'left' } }], row];
         }), ...labelsRow],
-        foot: [[{ content: `Total · ${groups.length} item(s) · ${types.size} trim type(s)${labelsRow.length ? ' + garment labels' : ''}`, colSpan: 3 }, '', '', '', '',
+        foot: [[{ content: `Total · ${groups.length} item(s) · ${types.size} trim type(s)${labelsRow.length ? ' + garment labels' : ''}${shortCells.size ? ` · ${shortCells.size} with a shortfall (red)` : ''}`, colSpan: 3 }, '', '', '', '',
             done ? `${groups.length + (labelsRow.length ? 1 : 0)} line(s)` : '', done ? (() => { const n = rows.filter(x => noteText(x)).length; return n ? `${n} short` : 'none short'; })() : '']],
         ...GRID, showFoot: 'lastPage', styles: { ...GRID.styles, fontSize: 8, cellPadding: 1.6, minCellHeight: 8, valign: 'middle' },
         headStyles: { fillColor: [30, 41, 59], textColor: 255, fontStyle: 'bold', valign: 'middle' },
@@ -112,7 +128,10 @@ export function exportPickList(k, lh, kit = null) {
         columnStyles: done
             ? { 0: { cellWidth: 8, halign: 'center' }, 1: { cellWidth: 22 }, 3: { halign: 'right', cellWidth: 20 }, 4: { halign: 'right', cellWidth: 15 }, 5: { halign: 'right', cellWidth: 22, fontStyle: 'bold' }, 6: { halign: 'right', cellWidth: 18 }, 7: { cellWidth: 20, halign: 'right' }, 8: { cellWidth: 32, fontSize: 7 } }
             : { 0: { cellWidth: 8, halign: 'center' }, 1: { cellWidth: 24 }, 3: { halign: 'right', cellWidth: 24 }, 4: { halign: 'right', cellWidth: 20 }, 5: { halign: 'right', cellWidth: 27, fontStyle: 'bold' }, 6: { halign: 'right', cellWidth: 20 }, 7: { cellWidth: 14 }, 8: { cellWidth: 20 } },
-        didParseCell: (d) => { if (d.section === 'head' && [3, 4, 5, 6].includes(d.column.index)) d.cell.styles.halign = 'right'; },
+        didParseCell: (d) => {
+            if (d.section === 'head' && [3, 4, 5, 6].includes(d.column.index)) d.cell.styles.halign = 'right';
+            if (d.section === 'body' && shortCells.get(d.row.raw)?.has(d.column.index)) { d.cell.styles.textColor = [159, 18, 57]; d.cell.styles.fontStyle = 'bold'; d.cell.styles.fillColor = [255, 241, 242]; }
+        },
         margin: { left: 8, right: 8 },
     });
     y = doc.lastAutoTable.finalY + 8;

@@ -34,7 +34,7 @@ export const slipRows = (s) => {
     if (s.planned?.length) return s.planned.map(p => ({ item_id: p.item_id, label: p.label, roll_no: p.roll_no, code: p.code, dye_lot: p.dye_lot, width: p.width, width_unit: p.width_unit, location: p.location, qty: p.qty, uom: p.uom, status: p.status, reason: p.reason }));
     return (s.lines || []).flatMap(l => (l.rolls?.length
         ? l.rolls.map(r => ({ item_id: l.item_id, label: l.label, roll_no: r.roll_no, code: `R${r.roll_id}`, dye_lot: r.dye_lot, qty: r.qty, uom: l.uom, returned_qty: r.returned_qty, status: 'RECEIVED' }))
-        : [{ item_id: l.item_id, label: l.label, qty: l.qty, uom: l.uom, returned_qty: l.returned_qty, status: 'RECEIVED' }]));
+        : [{ item_id: l.item_id, label: l.label, type_name: l.type_name, line_no: l.line_no, qty: l.qty, uom: l.uom, returned_qty: l.returned_qty, status: 'RECEIVED' }]));
 };
 // A fabric slip's rows by fabric, named by the garment colours it cuts on the order (8 Nov 2026, owner: "group rolls by
 // color and summary"): one colour's shell first by colour name; a fabric that serves several colours (pocketing) last.

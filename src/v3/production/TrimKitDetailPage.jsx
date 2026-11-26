@@ -18,6 +18,7 @@ import { loadLetterhead } from '../components/letterhead';
 import { KIT_STATE, REJECT_REASON, qty, groupKitLines, byStage, stageKey, stageName, spread } from './trimKitShared';
 import { exportPickList } from './kitPrint';
 import KitReturns from './KitReturns';
+import ItemFilter, { itemMatcher } from './ItemFilter';
 
 const r3 = (n) => Math.round(Number(n) * 1000) / 1000;
 const when = (d) => (d ? new Date(d).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '');
@@ -36,6 +37,8 @@ export default function TrimKitDetailPage() {
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
     const [formError, setFormError] = useState('');
+    const [fq, setFq] = useState('');           // item search (26 Nov 2026)
+    const [ftype, setFtype] = useState('');     // trim type filter
 
     const load = useCallback(async () => {
         try {
@@ -52,9 +55,12 @@ export default function TrimKitDetailPage() {
 
     const lineOf = new Map(k.lines.map(l => [l.id, l]));
     const groups = byStage(groupKitLines(kit.lines.map(kl => ({ ...lineOf.get(kl.order_line_id), picked: kl.qty, picked_units: kl.units }))));
-    // headings: one per trim type, in the pick list's order (stage → trim type → line no.)
+    // headings: one per trim type, in the pick list's order (stage → trim type → line no.); search / trim type narrow them
+    const filtering = Boolean(fq.trim() || ftype);
+    const match = itemMatcher(fq, ftype);
+    const itemTypes = [...new Set(groups.map(g => g.type_name).filter(Boolean))].sort((a, b) => a.localeCompare(b));
     const sections = [];
-    for (const g of groups) {
+    for (const g of groups.filter(match)) {
         const key = `${stageKey(g)}|${g.type_name || ''}`;
         if (!sections.length || sections[sections.length - 1].key !== key) sections.push({ key, type: g.type_name || 'Other', stage: stageName(g), rows: [] });
         sections[sections.length - 1].rows.push(g);
@@ -178,7 +184,10 @@ export default function TrimKitDetailPage() {
             )}
             {canSign && <p className="mb-3 text-sm text-slate-600">Tap each item as you find it in the bag. Something wrong — <b>Reject</b> it (all of it or part): what you don't take goes back to the store.</p>}
 
+            <ItemFilter q={fq} setQ={setFq} type={ftype} setType={setFtype} types={itemTypes} shown={groups.filter(match).length} total={groups.length} big />
+            {filtering && canSign && <p className="-mt-1 mb-3 text-sm text-amber-800">Filtered — the other items are hidden, not skipped: every item still needs a tick or a reject before Confirm.</p>}
             <div className="space-y-4">
+                {filtering && !sections.length && <p className="text-sm text-slate-500 bg-white border border-slate-200 rounded-xl p-6 text-center">No item in this kit matches.</p>}
                 {sections.map(sec => (
                     <div key={sec.key}>
                         <div className="flex items-baseline gap-2 mb-1.5 px-1">
@@ -188,7 +197,7 @@ export default function TrimKitDetailPage() {
                         <div className="space-y-2">{sec.rows.map(g => <Row key={g.key} g={g} />)}</div>
                     </div>
                 ))}
-                {LAB && (
+                {LAB && !filtering && (
                     <div>
                         <div className="flex items-baseline gap-2 mb-1.5 px-1"><h2 className="text-base font-black uppercase tracking-wider text-slate-800">Labels</h2><span className="text-xs text-slate-500">printed by the store</span></div>
                         <Row g={LAB} />
