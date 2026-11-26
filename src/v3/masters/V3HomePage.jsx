@@ -12,6 +12,11 @@ import { workApi } from '../api/workApi';
 import { trackerApi } from '../api/trackerApi';
 import { fmtDate } from '../salesOrders/SalesOrderStatusBadge';
 import { Dot } from '../tracker/trackerShared';
+import StoreHome from './StoreHome';
+
+// 26 Nov 2026: the trim store and the fabric store get their own layout (StoreHome.jsx — counters first, one orders
+// table, stock to allocate). Every other role keeps the page below as it was.
+const STORE_HOME_ROLES = ['store_manager', 'fabric_store_manager'];
 
 function Card({ to, count, title, hint, tone, changed }) {
     const zero = !count;
@@ -160,7 +165,9 @@ export default function V3HomePage() {
                     </span>}
                     </span>
                 )} />
-            {!work ? <Loading /> : nothing && pages.length === 0 ? (
+            {!work ? <Loading /> : STORE_HOME_ROLES.includes(me.role) ? (
+                <StoreHome work={work} tracker={me.menu['tracker.orders'] ? orders : []} changed={changed} />
+            ) : nothing && pages.length === 0 ? (
                 <div className="bg-white border border-slate-200 rounded-xl p-6 text-sm text-slate-600">
                     Nothing for your role in 3.0 yet — your work continues in 2.0 (Switch version, top right). The factory admin can give you extra access if you need a 3.0 page.
                 </div>

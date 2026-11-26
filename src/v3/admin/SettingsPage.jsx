@@ -348,6 +348,13 @@ function ProductionSection({ data, save, busy }) {
                 {n('over_cut_free_pct', 'Over-cut allowed without approval %', 'Cutting: garments cut above the order up to this % of the ordered quantity per colour × size (rounded down) need no approval; above it the merchandiser approves their trims (from free stock) or they are written off.', { max: 100 })}
                 {n('pocket_end_allowance_in', 'Pocketing / lining end allowance per ply (in)', 'New pocketing / lining lay: waste is filled in as plies × this at each end of the lay (the cutting master can change it on the lay).', { max: 50 })}
             </div>
+            {/* 26 Nov 2026 (migration 92; owner: "notification is enough but also build confirmation flow with auto confirm for now") */}
+            {f.trim_return_auto_confirm != null && (
+                <div className="mt-4">
+                    <Check checked={Boolean(f.trim_return_auto_confirm)} onChange={v => set({ trim_return_auto_confirm: v })}>Trims rejected by the line loader: received back automatically</Check>
+                    <p className="mt-1 text-xs text-slate-500">On: what the loader rejects from a trim kit is taken as back on the shelf when the kit is signed — the store is told (My work) and can still write off what is damaged. Off: the store confirms each one — received back, or written off.</p>
+                </div>
+            )}
             <p className="mt-4 mb-2 text-xs font-black uppercase tracking-wider text-slate-500">Reconciliation flags (drill-down)</p>
             <div className="grid sm:grid-cols-4 gap-3">
                 {n('rec_short_pct', 'Roll short above (%)', 'Fabric report: a roll short against its label by more than this is flagged (a supplier claim).', { max: 100 })}

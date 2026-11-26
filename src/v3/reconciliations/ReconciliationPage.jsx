@@ -197,6 +197,17 @@ export default function ReconciliationPage() {
                     <b>Outdated</b> — {r.outdated_reason}{r.outdated_by_name ? ` (${r.outdated_by_name}, ${when(r.outdated_at)})` : ` (${when(r.outdated_at)})`}. These figures no longer hold: it can't be approved or acknowledged — generate it again{r.kind === 'FABRIC' ? ' once the order\'s batches are finalised' : ''}.
                 </div>
             )}
+            {r.kind === 'FABRIC' && f.samples?.length > 0 && (
+                // Samples (26 Nov 2026): fabric that went to sampling — its own line, never bulk consumption per garment
+                <div className="mb-3 bg-white border border-violet-200 rounded-xl overflow-x-auto">
+                    <p className="px-4 pt-3 text-sm font-bold text-slate-800">Samples <span className="font-normal text-slate-500">— fabric handed to sampling, not in the consumption per garment</span></p>
+                    <table className="w-full text-sm mt-1"><thead className="text-xs font-bold text-slate-500 uppercase text-right"><tr><th className="px-4 py-1.5 text-left">Fabric</th><th className="px-3 py-1.5 text-left">Sample requests</th><th className="px-3 py-1.5">Issued</th><th className="px-3 py-1.5">Back</th><th className="px-3 py-1.5">Used</th></tr></thead>
+                        <tbody>{f.samples.map(x => (
+                            <tr key={x.item_id} className="border-t border-slate-100 text-right tabular-nums"><td className="px-4 py-1.5 text-left">{x.label}</td><td className="px-3 py-1.5 text-left text-xs">{x.requests || '—'}</td>
+                                <td className="px-3 py-1.5">{x.issued} {x.uom}</td><td className="px-3 py-1.5">{x.returned} {x.uom}</td><td className="px-3 py-1.5 font-bold">{x.net} {x.uom}</td></tr>))}
+                            <tr className="border-t-2 border-slate-200 bg-slate-50 text-xs font-bold"><td className="px-4 py-1.5 text-left" colSpan={5}>{f.samples.length} fabric(s) to sampling</td></tr></tbody></table>
+                </div>
+            )}
             {f.released_fabric?.length > 0 && (
                 <div className="mb-3 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
                     <p className="font-bold">Released to free stock when this report was approved:</p>
@@ -262,7 +273,7 @@ export default function ReconciliationPage() {
 
             {r.kind === 'TRIM' && (
                 <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto mb-4">
-                    <p className="px-4 pt-3 text-sm text-slate-600">{f.kit_no} · {f.garments_cut} garments cut{f.garments_rejected ? ` · ${f.garments_rejected} rejected (left out of "used")` : ''} · used = good garments × the kit's per-garment rate</p>
+                    <p className="px-4 pt-3 text-sm text-slate-600">{f.trim_order_no || f.kit_no} · {f.garments_cut} garments cut{f.garments_rejected ? ` · ${f.garments_rejected} rejected (left out of "used")` : ''} · used = good garments × the kit's per-garment rate</p>
                     <table className="w-full text-sm min-w-[860px]">
                         <thead className="text-xs font-bold text-slate-500 uppercase tracking-wider text-right"><tr><th className="px-3 py-2 text-left">Item</th><th className="px-3 py-2">Kit</th><th className="px-3 py-2">Handed</th><th className="px-3 py-2">Not handed</th><th className="px-3 py-2">Returned</th><th className="px-3 py-2">Net</th><th className="px-3 py-2">Used</th><th className="px-3 py-2">Over / under</th>{prices && <th className="px-3 py-2">Value</th>}</tr></thead>
                         <tbody>{f.items.map(x => (

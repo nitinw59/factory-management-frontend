@@ -13,6 +13,7 @@ export const NAV = [
     { to: '/v3/sales-orders', label: 'Sales orders', icon: FileText, key: 'sales.orders', text: 'Orders with colour × size quantities, PPM, documents' },
     { to: '/v3/tracker', label: 'Order tracker', icon: Radar, key: 'tracker.orders', text: 'Every order from style BOM to production, worst first' },
     { to: '/v3/planning/milestones', label: 'Order milestones', icon: CalendarDays, key: 'planning.milestones', text: 'Planned vs actual dates' },
+    { to: '/v3/samples', label: 'Samples', icon: Scissors, key: 'orders.samples', text: 'Proto, fit, PP, size set … — fabric and trims handed to sampling' },
     { to: '/v3/sales-order-approvals', label: 'Order approvals', icon: ClipboardCheck, key: 'sales.approvals', hidden: true },
     { section: 'Styles & BOMs' },   // Style BOM = per garment; Order BOM = quantities for an order (decided 13 Oct 2026)
     { to: '/v3/styles', label: 'Styles', icon: Shirt, key: 'styles.styles', text: 'Sizes, parts, route and style BOMs' },
@@ -45,7 +46,7 @@ export const NAV = [
     // The trim store's stock page (the Trim items & stock master) — in its place for them, not twice in the menu.
     { to: '/v3/masters/trim-items?stock=1', label: 'Trim stock', icon: Package, key: 'store.trimStock', replaces: 'masters.trimItems', text: 'Trim items with stock on hand and each item\'s ledger' },
     { to: '/v3/material-issue', label: 'Issue fabric', icon: Forklift, key: 'issue.materialIssue', text: 'Fabric to cutting: what to send, slips, what cutting has received' },
-    { to: '/v3/trim-kits', label: 'Trim kits', icon: Package, key: 'store.trimKits', text: 'Kits prepared for the lines; the line loader counts and signs' },
+    { to: '/v3/trim-orders', label: 'Trim orders & kits', icon: Package, key: 'store.trimKits', text: 'A trim order per cut batch; the store prepares it in kits, the line loader counts and signs each kit' },
     { to: '/v3/material-returns', label: 'Material returns', icon: Undo2, key: 'store.materialReturns', text: 'Fabric back from the cutting room, trims back from the lines — count and receive (partial allowed)' },
     { to: '/v3/replacement-fabric', label: 'Fabric for replacements', icon: PackageMinus, key: 'store.replacementFabric', text: 'Issue a whole roll when the cutting room has nothing for a replacement panel' },
     { section: 'Spares & general items' },
@@ -97,6 +98,7 @@ export const NAV = [
 const EXTRA = [
     { to: '/v3/planning/orders', key: 'planning.requirements' },
     { to: '/v3/orders', key: 'orders.hub' },
+    { to: '/v3/trim-kits', key: 'store.trimKits' },   // the kits queue and old kit links (26 Nov 2026)
 ];
 
 const pathOf = (to) => to.split('?')[0];

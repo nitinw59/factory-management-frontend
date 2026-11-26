@@ -30,13 +30,13 @@ function Generate({ kind, onDone }) {
             <ErrorBox text={error} />
             {!rows ? <div className="p-3"><Loading /></div> : rows.length === 0 ? <p className="px-4 py-4 text-sm text-slate-400">Nothing to reconcile yet.</p> : (
                 <div className="divide-y divide-slate-100 max-h-72 overflow-y-auto">{rows.map(x => {
-                    const key = kind === 'FABRIC' ? x.order_id : kind === 'STAGE' ? `${x.batch_id}|${x.stage_type_id}` : x.kit_id;
-                    const body = kind === 'FABRIC' ? { order_id: x.order_id } : kind === 'STAGE' ? { batch_id: x.batch_id, stage_type_id: x.stage_type_id } : { kit_id: x.kit_id };
+                    const key = kind === 'FABRIC' ? x.order_id : kind === 'STAGE' ? `${x.batch_id}|${x.stage_type_id}` : x.trim_order_id;
+                    const body = kind === 'FABRIC' ? { order_id: x.order_id } : kind === 'STAGE' ? { batch_id: x.batch_id, stage_type_id: x.stage_type_id } : { trim_order_id: x.trim_order_id };
                     return (
                         <div key={key} className="flex flex-wrap items-center gap-3 px-4 py-2 text-sm">
                             {kind === 'FABRIC' && <span><b>{x.order_no}</b> <span className="text-xs text-slate-500">{x.customer_name} · {x.batches_cut} batch(es) cut{x.batches_open ? ` · ${x.batches_open} still being cut` : ''}</span></span>}
                             {kind === 'STAGE' && <span><b>#{x.floor_no}</b> {x.stage} <span className="text-xs text-slate-500">{x.order_no} · completed {x.completed_at ? new Date(x.completed_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : ''}</span></span>}
-                            {kind === 'TRIM' && <span><b>{x.kit_no}</b> <span className="text-xs text-slate-500">{x.floor_no ? `#${x.floor_no} · ` : ''}{x.order_no} · kit {x.kit_status.toLowerCase().replace('_', ' ')}</span></span>}
+                            {kind === 'TRIM' && <span><b>{x.trim_order_no}</b> <span className="text-xs text-slate-500">{x.floor_no ? `#${x.floor_no} · ` : ''}{x.order_no} · trim order {x.kit_status.toLowerCase().replace('_', ' ')}</span></span>}
                             <span className="ml-auto">{latest(x)}</span>
                             {x.latest && <Link to={`/v3/reconciliations/${x.latest.id}`} className="text-xs font-bold text-indigo-700 hover:underline">Open</Link>}
                             <PrimaryButton busy={busy === key} disabled={Boolean(busy)} onClick={() => go(key, body)}>{x.latest ? 'Generate again' : 'Generate'}</PrimaryButton>

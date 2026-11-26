@@ -44,6 +44,7 @@ export default function OrderCostPage() {
                 <Card label="Per garment cut" value={money(s.per_garment_cut)} sub={`${s.cut} cut`} />
                 <Card label="Fabric · trims" value={`${money(s.fabric_actual)} · ${money(s.trims_actual)}`} sub={`planned ${money(s.fabric_planned)} · ${money(s.trims_planned)}`} />
                 {s.recut_metres > 0 && <Card label="Re-cuts" value={money(s.recut_cost)} sub={`${q3(s.recut_metres)} fabric`} tone="text-rose-700" />}
+                {s.sample_items > 0 && <Card label="Samples" value={money(s.sample_cost)} sub={`${s.sample_items} item(s) to sampling — in the issued cost`} tone="text-violet-700" />}
                 {variance != null && s.cut >= s.ordered && s.ordered > 0 && <Card label="Over / under plan" value={money(variance)} tone={variance > 0 ? 'text-rose-700' : 'text-emerald-700'} />}
             </div>
             {s.unpriced_items > 0 && (
@@ -74,7 +75,7 @@ export default function OrderCostPage() {
                                     </>}
                                 </td>
                                 <td className="px-3 py-2.5 text-right tabular-nums">{money(i.planned_cost)}</td>
-                                <td className="px-3 py-2.5 text-right tabular-nums font-bold">{money(i.actual_cost)}{i.unpriced_qty > 0 && <span className="block text-[11px] font-normal text-amber-800">{q3(i.unpriced_qty, i.uom)} {i.uom} without rate</span>}</td>
+                                <td className="px-3 py-2.5 text-right tabular-nums font-bold">{money(i.actual_cost)}{i.sample_net > 0 && <span className="block text-[11px] font-normal text-violet-700">samples {q3(i.sample_net, i.uom)} {i.uom}{i.sample_cost ? ` · ${money(i.sample_cost)}` : ''}</span>}{i.unpriced_qty > 0 && <span className="block text-[11px] font-normal text-amber-800">{q3(i.unpriced_qty, i.uom)} {i.uom} without rate</span>}</td>
                                 <td className="px-3 py-2.5 text-right tabular-nums">{i.recut_metres > 0 ? <>{money(i.recut_cost)}<span className="block text-[11px] text-slate-500">{q3(i.recut_metres)} {i.uom}</span></> : '—'}</td>
                             </tr>
                         ))}

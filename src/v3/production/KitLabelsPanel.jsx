@@ -43,7 +43,7 @@ export default function KitLabelsPanel({ kitId, onClose, onChanged }) {
                 <p className="text-sm text-slate-700"><b>{d.totals.printed}</b> of <b>{d.totals.garments}</b> labels printed (confirmed by the printer){unprinted > 0 ? <span className="text-amber-700"> · {unprinted} to print</span> : <span className="text-emerald-700"> · all printed</span>}</p>
                 <span className="ml-auto flex items-center gap-2">
                     <button type="button" onClick={load} className="p-2 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50" title="Refresh"><RefreshCw size={14} /></button>
-                    <button type="button" onClick={async () => { try { const r = await trimKitsApi.labelsCsv(kitId); const url = URL.createObjectURL(r.data); const a = document.createElement('a'); a.href = url; a.download = `labels-${d.kit.kit_no.replace(/\//g, '-')}.csv`; a.click(); URL.revokeObjectURL(url); } catch (err) { setError(apiError(err, 'Failed.')); } }}
+                    <button type="button" onClick={async () => { try { const r = await trimKitsApi.labelsCsv(kitId); const url = URL.createObjectURL(r.data); const a = document.createElement('a'); a.href = url; a.download = `labels-${d.kit.trim_order_no.replace(/\//g, '-')}.csv`; a.click(); URL.revokeObjectURL(url); } catch (err) { setError(apiError(err, 'Failed.')); } }}
                         className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-200 text-sm font-bold text-slate-700 hover:bg-slate-50"><FileDown size={14} /> CSV (backup)</button>
                 </span>
             </div>

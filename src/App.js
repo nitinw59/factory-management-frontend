@@ -292,6 +292,9 @@ const V3RecutsPage = lazyPage(() => import('./v3/production/RecutsPage'));
 const V3LineLoadingPage = lazyPage(() => import('./v3/production/LineLoadingPage'));
 const V3TrimKitsPage = lazyPage(() => import('./v3/production/TrimKitsPage'));
 const V3TrimKitPage = lazyPage(() => import('./v3/production/TrimKitPage'));
+const V3TrimKitDetailPage = lazyPage(() => import('./v3/production/TrimKitDetailPage'));   // the loader's kit page (26 Nov 2026; was a redirect to the trim order)
+const V3SamplesPage = lazyPage(() => import('./v3/samples/SamplesPage'));
+const V3SampleRequestPage = lazyPage(() => import('./v3/samples/SampleRequestPage'));
 const V3UserAccessPage = lazyPage(() => import('./v3/access/UserAccessPage'));
 const V3BomListPage = lazyPage(() => import('./v3/boms/BomListPage'));
 const V3CustomersAdminPage = lazyPage(() => import('./v3/admin/CustomersPage'));
@@ -416,9 +419,16 @@ const appRoutes = (
           <Route path="production/check" element={<V3StageCheckPage />} />
           <Route path="production/recuts" element={<V3RecutsPage />} />
           <Route path="production/loading" element={<V3LineLoadingPage />} />
+          {/* Trim orders and kits (26 Nov 2026, migration 90): /v3/trim-kits?status=READY is the kits queue */}
+          <Route path="trim-orders" element={<V3TrimKitsPage />} />
+          <Route path="trim-orders/slips/:id" element={<V3MaterialIssueSlipPage />} />
+          <Route path="trim-orders/:id" element={<V3TrimKitPage />} />
           <Route path="trim-kits" element={<V3TrimKitsPage />} />
           <Route path="trim-kits/slips/:id" element={<V3MaterialIssueSlipPage />} />
-          <Route path="trim-kits/:id" element={<V3TrimKitPage />} />
+          <Route path="trim-kits/:kitId" element={<V3TrimKitDetailPage />} />
+          {/* Samples — fabric and trims for PP, size set … (26 Nov 2026, migration 91) */}
+          <Route path="samples" element={<V3SamplesPage />} />
+          <Route path="samples/:id" element={<V3SampleRequestPage />} />
           <Route path="admin/access" element={<V3UserAccessPage />} />
           <Route path="admin/customers" element={<V3CustomersAdminPage />} />
           <Route path="admin/sizes" element={<V3SizesAdminPage />} />

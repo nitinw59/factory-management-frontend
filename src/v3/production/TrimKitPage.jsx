@@ -1,37 +1,36 @@
-// One trim kit — /v3/trim-kits/:id. Since 19 Oct 2026 (phase 5) every kit is made from its cut batch when the batch is
-// finalised: Order BOM rate × garments cut per colour × size (threads in whole cones) — the store can't change it.
-// 20 Oct 2026 ("Over-cut and trims"): over-cut garments are kitted on their own lines, handed from the store's free
-// stock; above the free limit they are held until the merchandiser approves (refused → taken off the kit).
-// 21 Oct 2026 ("Trim kits — store picking, handover and returns"):
-//   Store: print the pick list, put the items in the kit and enter what went in, line by line — less than owed needs a
-//   reason (not in stock / damaged / count short / other; damaged and count short adjust the stock); the kit goes ready
-//   with what was picked and the rest waits in Pending to fulfil. For a line it can't hand, the store proposes an extra
-//   line (another item, free stock) — the merchandiser approves; the original line is closed as replaced.
-//   Line loader: count each picked line — as picked, short, excess, wrong item or damaged; the good lines are signed
-//   (an MI3 issue slip and a valuation bill TB3/…), the bad ones go back to the store. Or send the whole kit back.
-// 27 Oct 2026 (owner: "do not wait for approval add everything whatever is CUT in batch trim kit, make separate column for
-// over cut quantity requirement and total quantity; in header clearly state in detailed small table"): nothing waits for
-// the over-cut approval; one row per item — Order · Over-cut · Total — and the pick / count take one number per item,
-// spread over its lines order first; a small table up top: per colour × size, ordered, cut before, cut now, for the
-// order, over-cut within the free limit and above it; items not in the store say so, with what is on order.
-// 25 Oct 2026 (kits follow the order's BOM, kitRefresh.js): an untouched kit is remade when the order's BOM changes (history
-// "Remade"); a kit the store has started keeps its lines and shows a "BOM changed" notice with each difference — the store
-// deals with it (an extra line for what is missing) and marks it dealt with (note optional).
-import { useCallback, useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, PackageCheck, Undo2, Ban, PenLine, RotateCcw, FileDown, Replace, Tag } from 'lucide-react';
+// One trim order and its kits — /v3/trim-orders/:id (26 Nov 2026, "Trim orders and kits", migration 90; was the trim kit
+// page). A cut batch's trim order (TO3/…) is made when the batch is finalised: Order BOM rate × garments cut per colour ×
+// size (threads in whole cones) — the store can't change it. The trim store prepares it in kits (TK3/…/####-n): any number,
+// half kits, stage by stage, several ready at once (owner, 26 Nov 2026). Each kit is a bag — the store writes the kit number
+// on it with a marker (no bag label yet), its pick list prints the number large. Any line loader counts and signs a kit (one
+// TI slip + one TB valuation bill) or sends it back. The store chooses which kit carries the garment barcode labels.
+// Kept from the kit page:
+//   20 / 27 Oct 2026: over-cut garments on their own lines (free stock), one row per item — Order · Over-cut · Total.
+//   21 Oct 2026: less than can go in needs a reason (not in stock / damaged / count short / other; damaged and count short
+//   adjust the stock); what can't go in waits in Pending to fulfil; an extra line (another item, free stock) for a line the
+//   store can't hand — the merchandiser approves. Count: as picked, short, excess, wrong item or damaged; the good lines are
+//   signed, the bad ones stay owed on the trim order.
+//   25 Oct 2026: the order's BOM changed after the store started → a notice to deal with (kitRefresh.js).
+//   26 Nov 2026: never a 0 line; skip by tick box, by item or a whole issue stage; more than can go in → back to the most.
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { ArrowLeft, PackageCheck, PackagePlus, Undo2, Ban, PenLine, RotateCcw, FileDown, Replace, Tag, Pencil, Save, HandHelping, ListPlus } from 'lucide-react';
 import Modal from '../../shared/Modal';
 import { trimKitsApi } from '../api/trimKitsApi';
 import { apiError, mastersApi } from '../api/mastersApi';
 import { useV3Live } from '../live';
 import { Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, Loading } from '../components/ui';
 import { loadLetterhead } from '../components/letterhead';
-import { KIT_STATUS, ACTION, SHORT_REASON, COUNT_ISSUE, qty, handout, groupKitLines, spread, isOver, unitsOwedOf, byTrimType } from './trimKitShared';
+import { ORDER_STATUS, KIT_STATE, ACTION, SHORT_REASON, COUNT_ISSUE, qty, handout, groupKitLines, spread, isOver, byStage, stageKey, stageName, pickCaps, WAIT_CAUSE } from './trimKitShared';
 import { exportPickList, exportKitBill } from './kitPrint';
 import KitLabelsPanel from './KitLabelsPanel';
+import KitReturns from './KitReturns';
 
 const money = (n) => (n == null ? '—' : `₹${Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
-const amount = (l, v) => (l.in_units ? `${v} ${l.purchase_uom}` : `${qty(v, l.uom)} ${l.uom}`);
+const r3 = (n) => Math.round(Number(n) * 1000) / 1000;
+const when = (d) => (d ? new Date(d).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '');
+const OPEN = ['OPEN', 'PARTLY_ISSUED'];
+const KIT_OPEN = ['PREPARING', 'READY'];
 
 const PART_LABEL = { ORDER: 'order', OVER_FREE: 'over-cut (free limit)', OVER_APPROVAL: 'over-cut (above it)', EXTRA: 'extra line' };
 
@@ -49,14 +48,14 @@ function CutSummary({ k, rows }) {
     if (!cells.length) return null;
     const t = cells.reduce((a, c) => ({ cut: a.cut + c.cut, within: a.within + c.within, free: a.free + c.free, approval: a.approval + c.approval }), { cut: 0, within: 0, free: 0, approval: 0 });
     const notInStore = rows.filter(g => g.stock_on_hand <= 0 && g.remaining > 0).length;
-    const status = !oc || oc.status === 'WITHIN' ? null : oc.status === 'PENDING' ? 'waiting for the merchandiser — the kit does not wait'
+    const status = !oc || oc.status === 'WITHIN' ? null : oc.status === 'PENDING' ? 'waiting for the merchandiser — the kits do not wait'
         : oc.status === 'APPROVED' ? `approved${oc.decided_by_name ? ` by ${oc.decided_by_name}` : ''}` : `refused${oc.decided_by_name ? ` by ${oc.decided_by_name}` : ''} — those garments are written off${oc.decision_note ? ` (${oc.decision_note})` : ''}`;
     const TH = 'px-2 py-1 text-[10px] font-bold uppercase tracking-wider';
     return (
         <div className="bg-white border border-slate-200 border-l-4 border-l-sky-500 rounded-xl overflow-hidden mb-3">
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-3 py-2 bg-sky-50 border-b border-sky-100">
-                <span className="text-xs font-black uppercase tracking-wider text-sky-900">What this kit is for</span>
-                <span className="text-xs text-slate-600"><b>{t.cut}</b> garments cut = <b>{t.within}</b> for the order{t.free + t.approval > 0 ? <> + <b className="text-sky-800">{t.free + t.approval}</b> over-cut ({t.free} within the {oc?.free_pct ?? 0}% free limit, {t.approval} above it)</> : ''} — all kitted</span>
+                <span className="text-xs font-black uppercase tracking-wider text-sky-900">What this trim order is for</span>
+                <span className="text-xs text-slate-600"><b>{t.cut}</b> garments cut = <b>{t.within}</b> for the order{t.free + t.approval > 0 ? <> + <b className="text-sky-800">{t.free + t.approval}</b> over-cut ({t.free} within the {oc?.free_pct ?? 0}% free limit, {t.approval} above it)</> : ''} — all on the trim order</span>
                 <span className="ml-auto text-xs text-slate-600">{rows.length} item(s){notInStore ? <> · <b className="text-rose-700">{notInStore} not in store</b></> : ''}</span>
             </div>
             <div className="overflow-x-auto">
@@ -88,134 +87,242 @@ function CutSummary({ k, rows }) {
     );
 }
 
-export default function TrimKitPage() {
+export default function TrimOrderPage() {
     const { id } = useParams();
-    return <KitView id={id} />;
+    return <OrderView key={id} id={id} />;
 }
 
-function KitView({ id }) {
+function OrderView({ id }) {
+    const [params, setParams] = useSearchParams();
+    const focusKit = params.get('kit');
+    const navigate = useNavigate();
     const [k, setK] = useState(null);
     const [perm, setPerm] = useState({ prepare: false, sign: false });
     const [error, setError] = useState('');
     const [busy, setBusy] = useState(false);
-    const [basis, setBasis] = useState(null);     // kit line whose calculation is open
-    const [pick, setPick] = useState(null);       // { rows: Map(lineId → { v, reason, note }) }
-    const [count, setCount] = useState(null);     // { lines: [], line_id, rows: Map(lineId → { v, issue, damaged, note }), note, legacy }
-    const [extra, setExtra] = useState(null);     // { line, search, items, item_id, qty, reason }
-    const [ask, setAsk] = useState(null);         // { title, confirm, hint, label, optional, run(reason) }
+    const [basis, setBasis] = useState(null);       // item row whose calculation is open
+    const [edit, setEdit] = useState(null);         // kit editor: { kit, base, groups, waiting, rows: Map(key → { v, reason, note, on, capped }), line_id, lines, labelsOn, labels, notes }
+    const [extra, setExtra] = useState(null);       // { line, search, items, item_id, qty, reason }
+    const [ask, setAsk] = useState(null);           // { title, confirm, hint, label, optional, run(reason) }
     const [askText, setAskText] = useState('');
     const [formError, setFormError] = useState('');
-    const [labelsOpen, setLabelsOpen] = useState(false);   // garment barcode labels (23 Oct 2026)
-    const load = useCallback(() => trimKitsApi.get(id).then(res => setK(res.data)).catch(err => setError(apiError(err, 'Failed to load the kit.'))), [id]);
+    const [labelsOpen, setLabelsOpen] = useState(false);
+    const [showCut, setShowCut] = useState(false);
+    const [showCancelled, setShowCancelled] = useState(false);
+    const [prodLines, setProdLines] = useState(null);
+    const [handOver, setHandOver] = useState(null);   // a sample's kit to sampling (26 Nov 2026): { kit, name, note }
+    const [change, setChange] = useState(null);       // a sample's lines: { rows: Map(line id → qty), add: [{ item, qty }], search, items, reason }
+    // Tables collapsed by default, each to its summary line (26 Nov 2026, owner: "by default collapse tables with summary";
+    // asked about the kit being prepared: "no fold that too") — every kit, the linked one (?kit=) and a new one included;
+    // the linked kit is still highlighted and scrolled to.
+    const [shown, setShown] = useState(() => new Set());
+    const isShown = (key) => shown.has(key);
+    const toggle = (key) => setShown(s => { const n = new Set(s); if (n.has(key)) n.delete(key); else n.add(key); return n; });
+    const kitRefs = useRef({});
+    const load = useCallback(() => trimKitsApi.get(id).then(res => setK(res.data)).catch(err => setError(apiError(err, 'Failed to load the trim order.'))), [id]);
     useEffect(() => { load(); trimKitsApi.permissions().then(res => setPerm(res.data)).catch(() => {}); }, [load]);
-    useV3Live(() => { if (!count && !pick && !extra && !labelsOpen) load(); });
+    useV3Live(() => { if (!edit && !extra && !labelsOpen && !handOver && !change) load(); });
+    const loaded = Boolean(k);
+    useEffect(() => { if (loaded && focusKit && kitRefs.current[focusKit]) kitRefs.current[focusKit].scrollIntoView({ block: 'center' }); }, [loaded, focusKit]);
     const run = async (fn, close) => {
         setBusy(true); setFormError(''); setError('');
-        try { setK((await fn()).data); if (close) close(); } catch (err) { (close ? setFormError : setError)(apiError(err, 'Failed.')); } finally { setBusy(false); }
+        try {
+            const d = (await fn()).data; setK(d); if (close) close();
+            if (d && d.kit_id) setParams({ kit: d.kit_id }, { replace: true });
+        } catch (err) { (close ? setFormError : setError)(apiError(err, 'Failed.')); } finally { setBusy(false); }
     };
+    const needLines = () => (prodLines ? Promise.resolve(prodLines) : trimKitsApi.lines().then(r => { setProdLines(r.data); return r.data; }));
     if (!k) return error ? <ErrorBox text={error} /> : <Loading />;
-    const S = k.status;
-    const open = k.lines.filter(l => l.remaining > 0 && !l.held);
-    const picked = k.lines.filter(l => l.picked > 0);
-    const LB = k.labels;   // garment labels line (23 Oct 2026): qty, issued, picked, remaining, printed, available — no stock
-    const legacy = S === 'READY' && picked.length === 0 && !(LB && LB.picked > 0);   // made ready before picking existed: counted against what it owes
-    const toCount = legacy ? open : picked;
-    const pendingExtra = (k.extra_requests || []).filter(r => r.status === 'PENDING');
-    // One row per item; all in the pick list's order — trim type, then line no. (23 Nov 2026).
-    const rows = byTrimType(groupKitLines(k.lines));           // one row per item (order + over-cut)
-    const openRows = byTrimType(groupKitLines(open));           // what is still owed, per item
-    const countRows = byTrimType(groupKitLines(toCount));       // what the loader counts, per item
-    const BC = k.bom_change;   // the order's BOM changed after the store started on the kit (25 Oct 2026)
-    const remadeAt = k.history.find(h => h.action === 'REMADE')?.created_at;
 
-    // ── picking (store) — one number per item, spread over its lines (order first)
-    // Starts at what the stock can give (owed, or less when the stock is short) — the keeper corrects it to what physically went in.
-    const owedOf = (g) => (g.in_units ? g.units_owed : g.remaining);
-    // the over-cut share only out of free stock (not allocated to any order) — the signing refuses it otherwise
-    const canGive = (g) => {
-        if (g.in_units) return Math.min(g.units_owed, Math.floor(g.stock_on_hand / g.factor + 1e-9));
-        const fl = (v) => (g.uom === 'pcs' ? Math.floor(v + 1e-9) : Math.round(v * 1000) / 1000);
-        const forOrder = Math.min(g.remaining - g.over_remaining, fl(g.stock_on_hand));
-        const forOver = Math.min(g.over_remaining, fl(Math.max(0, Math.min(g.stock_on_hand - forOrder, g.stock_free))));
-        return Math.max(0, forOrder + forOver);
+    const S = k.status; const isOpen = OPEN.includes(S);
+    // Samples (26 Nov 2026, migration 91): a sample's trim order — from free stock, no batch; the store hands each kit to
+    // sampling (typing who took it) and may change the lines with a reason, while the sample request is open.
+    const isSample = k.kind === 'SAMPLE';
+    const waitCause = (c) => (isSample && c === 'free' ? 'no free stock' : WAIT_CAUSE[c]);
+    const lineOf = new Map(k.lines.map(l => [l.id, l]));
+    const LB = k.labels;   // garment labels line: qty, issued, picked (in open kits), remaining, printed, available, available_for_kit — no stock
+    const kits = [...(k.kits || [])].sort((a, b) => a.kit_seq - b.kit_seq);
+    const liveKits = kits.filter(t => t.status !== 'CANCELLED');
+    const cancelledKits = kits.filter(t => t.status === 'CANCELLED');
+    const openKits = kits.filter(t => KIT_OPEN.includes(t.status));
+    const nKits = (st) => kits.filter(t => t.status === st).length;
+    const kitNoOf = (kid) => kits.find(t => t.id === kid)?.kit_no;
+    const pendingExtra = (k.extra_requests || []).filter(r => r.status === 'PENDING');
+    // One row per item; all in the pick list's order — issue stage (route order), trim type, line no. (26 Nov 2026).
+    const rows = byStage(groupKitLines(k.lines));
+    const toKitRows = byStage(groupKitLines(k.lines.filter(l => l.to_kit > 0 && !l.held)));   // owed and in no open kit
+    const BC = k.bom_change;   // the order's BOM changed after the store started (25 Oct 2026)
+    const remadeAt = k.history.find(h => h.action === 'REMADE')?.created_at;
+    // Reserved for the order (phase 0): the notice and the column.
+    const orderOwed = (g) => Math.max(0, g.remaining - g.over_remaining);
+    const reservedOf = (g) => Number(g.order_allocated || 0);
+    const resGap = (g, orderQty) => { const gap = r3(orderQty - reservedOf(g)); return gap > 1e-9 && !(g.in_units && gap < g.factor - 1e-9) ? gap : 0; };
+    const notReserved = (g) => !g.extra && g.remaining > 0 && resGap(g, orderOwed(g)) > 0;
+    const unreserved = k.kind === 'SAMPLE' ? [] : rows.filter(notReserved);   // a sample comes from free stock — no reservation
+    const bomLink = `/v3/planning/orders/${k.order_id}?tab=TRIM`;
+    // what can go in a kit now (the server's can_now — net of every open kit) and what waits, with its cause
+    const canNow = toKitRows.filter(g => pickCaps(g).total > 0);
+    const waitKeys = new Set(toKitRows.filter(g => !(pickCaps(g).total > 0) && !(g.issued > 0) && !(g.in_kits > 0)).map(g => g.key));
+    const missing = toKitRows.map(g => ({ g, cp: pickCaps(g) }))
+        .map(x => ({ ...x, waitQty: x.g.in_units ? x.g.units_to_kit - x.cp.total : r3(x.g.to_kit - x.cp.total) })).filter(x => x.waitQty > 1e-9);
+    const causeText = (list) => [['stock', 'not in store'], ['res', 'not reserved'], ['free', k.kind === 'SAMPLE' ? 'no free stock' : 'no free stock for the over-cut']]
+        .map(([c, t]) => { const n = list.filter(x => (x.cp.cause || 'stock') === c).length; return n ? `${n} ${t}` : ''; }).filter(Boolean).join(' · ');
+    const missingText = causeText(missing);
+    const canKit = perm.prepare && isOpen && (canNow.length > 0 || Boolean(LB && LB.available_for_kit > 0));
+    const searchChangeItems = async (q) => {
+        try { const x = await mastersApi.trimItems({ search: q || undefined, active: 'true' }); setChange(c => c && { ...c, items: x.data }); } catch (err) { setFormError(apiError(err, 'Failed.')); }
     };
-    const openPick = () => { setFormError(''); setPick({ rows: new Map(openRows.map(g => [g.key, { v: String(Math.max(0, canGive(g))), reason: canGive(g) <= 0 ? 'NOT_IN_STOCK' : '', note: '' }])) }); };
-    const pickShort = (g, r) => Number(r.v || 0) + 1e-9 < owedOf(g);
-    const pickReady = pick && openRows.every(g => { const r = pick.rows.get(g.key); return !pickShort(g, r) || (r.reason && (r.reason !== 'OTHER' || r.note.trim())); });
-    const pickAny = pick && (openRows.some(g => Number(pick.rows.get(g.key).v || 0) > 0) || (LB && LB.available > 0));
-    const canPick = open.length > 0 || Boolean(LB && LB.remaining > 0);
-    const pickPayload = () => openRows.flatMap(g => {
-        const r = pick.rows.get(g.key);
-        const caps = g.lines.map(l => (l.in_units ? unitsOwedOf(l) : l.remaining));
-        return spread(r.v, caps).map((v, i) => {
-            const l = g.lines[i];
-            return { kit_line_id: l.id, [l.in_units ? 'units' : 'qty']: v, ...(v + 1e-9 < caps[i] ? { reason: r.reason, note: r.note || undefined } : {}) };
-        });
-    });
-    // ── count (loader) — one count per item, spread over the lines that were picked (order first)
-    const openCount = () => {
-        setFormError('');
-        const mine = new Set((k.batch_lines || []).map(l => l.id));
-        trimKitsApi.lines().then(res => setCount({
-            lines: [...res.data.filter(l => mine.has(l.id)), ...res.data.filter(l => !mine.has(l.id))], line_id: k.batch_lines?.length === 1 ? k.batch_lines[0].id : '', note: '', legacy,
-            rows: new Map(countRows.map(g => [g.key, { v: String(pickedOfG(g)), issue: '', damaged: '', note: '' }])),
-            labels: LB && LB.picked > 0 ? { v: String(LB.picked), note: '' } : null,
-        })).catch(err => setError(apiError(err, 'Failed to load lines.')));
-    };
-    const pickedOf = (l) => (l.in_units ? (legacy ? unitsOwedOf(l) : l.picked_units) : (legacy ? l.remaining : l.picked));
-    const pickedOfG = (g) => Math.round(g.lines.reduce((a, l) => a + (Number(pickedOf(l)) || 0), 0) * 1000) / 1000;
-    const outcome = (g, r) => {
-        const p = pickedOfG(g); const v = Number(r.v || 0);
-        if (r.issue === 'WRONG_ITEM') return { kind: 'WRONG_ITEM', signed: 0 };
-        if (r.issue === 'DAMAGED') return { kind: 'DAMAGED', signed: Math.max(0, Math.min(v, p) - Number(r.damaged || 0)) };
-        if (v > p) return { kind: 'EXCESS', signed: p };
-        if (v < p) return { kind: 'SHORT', signed: v };
-        return { kind: 'OK', signed: p };
-    };
-    const countPayload = () => countRows.flatMap(g => {
-        const r = count.rows.get(g.key);
-        const caps = g.lines.map(l => Number(pickedOf(l)) || 0);
-        const shares = spread(r.v, caps);
-        // damaged: taken off the over-cut lines first (the last lines), never above what each line counted
-        let dLeft = r.issue === 'DAMAGED' ? Number(r.damaged || 0) : 0;
-        const dmg = shares.map(() => 0);
-        for (let i = shares.length - 1; i >= 0 && dLeft > 0; i -= 1) { const d = Math.min(dLeft, Math.min(shares[i], caps[i])); dmg[i] = d; dLeft = Math.round((dLeft - d) * 1000) / 1000; }
-        return g.lines.map((l, i) => {
-            const base = { kit_line_id: l.id, [l.in_units ? 'units' : 'qty']: shares[i] };
-            if (r.issue === 'WRONG_ITEM') return { ...base, issue: 'WRONG_ITEM', note: r.note || undefined };
-            if (r.issue === 'DAMAGED' && dmg[i] > 0) return { ...base, issue: 'DAMAGED', damaged: dmg[i], note: r.note || undefined };
-            return base;
-        });
-    });
-    const countReady = count && count.line_id && countRows.every(g => { const r = count.rows.get(g.key); return r.v !== '' && (r.issue !== 'WRONG_ITEM' || r.note.trim()) && (r.issue !== 'DAMAGED' || Number(r.damaged) > 0); })
-        && (!count.labels || (count.labels.v !== '' && Number.isInteger(Number(count.labels.v)) && Number(count.labels.v) >= 0));
+    const openChange = () => { setFormError(''); setChange({ rows: new Map(), add: [], search: '', items: null, reason: '' }); searchChangeItems(''); };
+    const changePayload = () => change && [
+        ...[...change.rows.entries()].filter(([lid, v]) => v !== '' && Number(v) !== lineOf.get(lid)?.qty).map(([lid, v]) => ({ id: lid, qty: Number(v), reason: change.reason.trim() })),
+        ...change.add.filter(a => Number(a.qty) > 0).map(a => ({ trim_item_id: a.item.id, qty: Number(a.qty), reason: change.reason.trim() })),
+    ];
     const askReason = (cfg) => { setAskText(''); setFormError(''); setAsk(cfg); };
     const searchItems = async (q) => {
         try { const r = await mastersApi.trimItems({ search: q || undefined, active: 'true' }); setExtra(x => x && { ...x, items: r.data.filter(i => String(i.id) !== x.line.item_id) }); } catch (err) { setFormError(apiError(err, 'Failed.')); }
     };
+    const extraFor = (g) => g.lines.find(l => l.part === 'ORDER' && l.remaining > 0 && !(l.in_kits > 0)) || g.lines.find(l => l.remaining > 0 && l.part !== 'EXTRA' && !(l.in_kits > 0));
+    const openExtra = (head) => { setFormError(''); setExtra({ line: head, search: '', items: null, item_id: '', qty: '', reason: head.pick?.reason ? SHORT_REASON[head.pick.reason] : '' }); searchItems(''); };
+
+    // ── kit editor (store): new kit, or change one being prepared. Rows = what can go in now (the order read with this
+    // kit not there, so its own quantities count as free to put back); each row starts at what is in the kit (or, new, at
+    // what can go in). Untick an item or a whole stage to leave it for another kit — no reason; less than can go in → a reason.
+    const openEditor = async (kit = null) => {
+        setFormError(''); setError('');
+        try {
+            const [base, pls] = await Promise.all([kit ? trimKitsApi.get(id, { except_kit: kit.id }).then(r => r.data) : Promise.resolve(k), needLines()]);
+            const inKit = new Map((kit?.lines || []).map(kl => [kl.order_line_id, kl]));
+            const all = byStage(groupKitLines(base.lines.filter(l => (l.to_kit > 0 && !l.held) || inKit.has(l.id))));
+            const groups = all.filter(g => pickCaps(g).total > 0 || g.lines.some(l => inKit.has(l.id)));
+            const was = (g) => { const ls = g.lines.filter(l => inKit.has(l.id)); if (!ls.length) return null; return g.in_units ? ls.reduce((a, l) => a + (inKit.get(l.id).units || 0), 0) : r3(ls.reduce((a, l) => a + inKit.get(l.id).qty, 0)); };
+            const goes = kit ? (kit.production_line_id || '') : (base.batch_lines?.length === 1 ? base.batch_lines[0].id : '');
+            setEdit({ kit, base, groups, waiting: all.filter(g => !groups.includes(g)), line_id: goes, lines: pls, notes: kit?.notes || '',
+                rows: new Map(groups.map(g => { const w = was(g); return [g.key, { v: String(w ?? pickCaps(g).total), reason: '', note: '', on: kit ? w != null : true }]; })),
+                labelsOn: Boolean(kit?.labels_qty), labels: String(kit?.labels_qty || base.labels?.available_for_kit || 0) });
+        } catch (err) { setError(apiError(err, 'Failed to open the kit.')); }
+    };
+    const E = edit;
+    const eRow = (g) => E.rows.get(g.key);
+    const setRow = (g, patch) => setEdit(e => ({ ...e, rows: new Map(e.rows).set(g.key, { ...e.rows.get(g.key), ...patch }) }));
+    const setStage = (key, on) => setEdit(e => { const m = new Map(e.rows); for (const g of e.groups) if (stageKey(g) === key) m.set(g.key, { ...m.get(g.key), on }); return { ...e, rows: m }; });
+    const eStages = E ? (() => { const m = new Map(); for (const g of E.groups) { const key = stageKey(g); if (!m.has(key)) m.set(key, { key, name: stageName(g), rows: [] }); m.get(key).rows.push(g); } return [...m.values()]; })() : [];
+    const isOn = (g) => Boolean(E?.rows.get(g.key)?.on);
+    const eShort = (g, r) => r.on && Number(r.v || 0) > 0 && Number(r.v || 0) + 1e-9 < pickCaps(g).total;
+    const eOver = (g, r) => r.on && Number(r.v || 0) > pickCaps(g).total + 1e-9;
+    const eZero = E ? E.groups.filter(g => { const r = eRow(g); return r.on && !(Number(r.v || 0) > 0); }) : [];
+    const eBlocked = E ? E.groups.filter(g => eOver(g, eRow(g))) : [];
+    const eGoing = E ? E.groups.filter(g => { const r = eRow(g); return r.on && Number(r.v || 0) > 0; }).length : 0;
+    const eSkipped = E ? E.groups.filter(g => !eRow(g).on).length : 0;
+    const eLabAvail = E ? (E.base.labels?.available_for_kit || 0) : 0;
+    const eLabels = E && E.labelsOn ? Number(E.labels || 0) : 0;
+    const eLabBad = Boolean(E && E.labelsOn && (!Number.isInteger(eLabels) || eLabels <= 0 || eLabels > eLabAvail));
+    const eReady = Boolean(E) && !eBlocked.length && !eZero.length && !eLabBad && (eGoing > 0 || eLabels > 0)
+        && E.groups.every(g => { const r = eRow(g); return !eShort(g, r) || (r.reason && (r.reason !== 'OTHER' || r.note.trim())); });
+    const eGoingStages = E ? eStages.filter(st => st.rows.some(isOn)).map(st => st.name) : [];
+    // one number per item, spread over its lines by what each can take (order first); a line with nothing is left out
+    const ePayload = (ready) => ({
+        lines: E.groups.filter(isOn).flatMap(g => {
+            const r = eRow(g); const caps = pickCaps(g).caps.map(c => (g.in_units ? c.units || 0 : c.qty));
+            return spread(r.v, caps).map((v, i) => ({ l: g.lines[i], v, cap: caps[i] })).filter(x => x.v > 0)
+                .map(x => ({ order_line_id: x.l.id, [x.l.in_units ? 'units' : 'qty']: x.v, ...(x.v + 1e-9 < x.cap ? { reason: r.reason, note: r.note || undefined } : {}) }));
+        }),
+        labels_qty: eLabels, production_line_id: E.line_id || null, notes: E.notes.trim() || null, ready,
+    });
+    const saveKit = (ready) => run(() => (E.kit ? trimKitsApi.updateKit(E.kit.id, ePayload(ready)) : trimKitsApi.createKit(id, ePayload(ready))), () => setEdit(null));
+
+    // a kit's items in the pick list's order (counting and signing: the loader's kit page, /v3/trim-kits/:kitId — 26 Nov 2026)
+    const kitGroups = (kit) => byStage(groupKitLines(kit.lines.map(kl => ({ ...lineOf.get(kl.order_line_id), picked: kl.qty, picked_units: kl.units }))));
+    const closeOrder = () => {
+        if (openKits.length) { setError(`${openKits.map(t => t.kit_no).join(', ')} ${openKits.length === 1 ? 'is' : 'are'} still being prepared or ready — have ${openKits.length === 1 ? 'it' : 'them'} signed, or cancel ${openKits.length === 1 ? 'it' : 'them'}, first.`); return; }
+        const none = k.handovers.length === 0;
+        askReason({ title: none ? `Cancel ${k.trim_order_no}` : `Close ${k.trim_order_no}`, confirm: none ? 'Cancel trim order' : 'Close trim order',
+            hint: none ? 'Nothing was handed over. Say why the batch\'s trims are not needed.' : 'What was handed stays issued; the rest will not be handed. Say why (it shows in the trim reconciliation).',
+            run: (r) => trimKitsApi.close(id, r) });
+    };
+
+    const KitCard = (t) => {
+        const groups = kitGroups(t); const st = KIT_STATE[t.status] || KIT_STATE.PREPARING; const focused = focusKit === t.id;
+        const h = k.handovers.find(x => x.id === t.handover_id);
+        const open = isShown(`kit-${t.id}`);
+        return (
+            <div key={t.id} ref={el => { kitRefs.current[t.id] = el; }} className={`bg-white rounded-xl overflow-hidden ${t.status === 'PREPARING' ? `border-2 border-slate-800${focused ? ' ring-2 ring-indigo-300' : ''}` /* being prepared: dark border (owner, 26 Nov 2026) */
+                : `border ${focused ? 'border-indigo-400 ring-2 ring-indigo-200' : t.status === 'READY' ? 'border-emerald-300' : 'border-slate-200'}`}`}>
+                <div role="button" tabIndex={0} aria-expanded={open} title={open ? 'Hide the items' : 'Show the items'} onClick={() => toggle(`kit-${t.id}`)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(`kit-${t.id}`); } }}
+                    className={`flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 border-b border-slate-100 cursor-pointer select-none hover:bg-slate-100/70 ${t.status === 'READY' ? 'bg-emerald-50/60' : 'bg-slate-50'}`}>
+                    <span className="text-slate-500 text-sm w-3">{open ? '▾' : '▸'}</span>
+                    <span className="text-xl font-black tracking-tight text-slate-900">{t.kit_no}</span>
+                    <span className={`text-[11px] font-black px-2 py-0.5 rounded border ${st.cls}`}>{st.label}</span>
+                    <span className="text-sm text-slate-700">{t.stages?.length ? t.stages.join(', ') : 'no stage'} → <b>{isSample ? 'sampling' : t.goes_to || 'any line'}</b></span>
+                    <span className="text-xs text-slate-500">{groups.length} item{groups.length === 1 ? '' : 's'}{t.labels_qty ? ` + ${t.labels_qty} garment labels` : ''}</span>
+                    <span className="ml-auto text-xs text-slate-500">{t.status === 'READY' ? `ready ${when(t.ready_at)}${t.ready_by_name ? ` · ${t.ready_by_name}` : ''}`
+                        : t.status === 'SIGNED' ? `signed ${when(t.signed_at)}${h?.signed_by_name ? ` · ${h.signed_by_name}` : ''}${h?.production_line_name ? ` · ${h.production_line_name}` : ''}`
+                            : t.status === 'CANCELLED' ? `cancelled ${when(t.cancelled_at)}${t.cancelled_by_name ? ` · ${t.cancelled_by_name}` : ''}` : `made ${when(t.created_at)}${t.created_by_name ? ` · ${t.created_by_name}` : ''}`}</span>
+                </div>
+                {t.status === 'PREPARING' && t.sent_back_at && <div className="px-4 py-2 text-sm bg-rose-50 border-b border-rose-200 text-rose-900"><b>Sent back {when(t.sent_back_at)}:</b> {t.sent_back_reason} — correct the kit and mark it ready again.</div>}
+                {t.status === 'CANCELLED' && <p className="px-4 py-2 text-sm text-slate-600">Cancelled: {t.cancelled_reason} — what was in it went back to the shelf; the items stay owed on the trim order.</p>}
+                {t.notes && <p className="px-4 pt-2 text-xs text-slate-600"><b>Note:</b> {t.notes}</p>}
+                {t.status !== 'CANCELLED' && open && (
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                            <thead className="text-xs font-bold text-slate-500 uppercase tracking-wider text-left"><tr><th className="px-4 py-1.5 w-10">#</th><th className="px-3 py-1.5">Stage</th><th className="px-3 py-1.5">Trim type</th><th className="px-3 py-1.5">Item</th><th className="px-3 py-1.5 text-right">In the kit</th></tr></thead>
+                            <tbody>
+                                {groups.map(g => (
+                                    <tr key={g.key} className="border-t border-slate-100">
+                                        <td className="px-4 py-1.5 tabular-nums text-slate-500">{g.line_no}</td>
+                                        <td className="px-3 py-1.5 text-xs font-semibold text-slate-600 whitespace-nowrap">{stageName(g)}</td>
+                                        <td className="px-3 py-1.5 text-xs whitespace-nowrap">{g.type_name || '—'}</td>
+                                        <td className="px-3 py-1.5"><span className="font-semibold text-slate-800">{g.label}</span>{g.extra && <span className="ml-1 text-[11px] text-violet-700">extra line · free stock</span>}{g.lines.some(isOver) && <span className="ml-1 text-[11px] text-sky-700">order + over-cut</span>}</td>
+                                        <td className="px-3 py-1.5 text-right tabular-nums font-bold whitespace-nowrap">{g.in_units ? `${g.picked_units} ${g.purchase_uom} = ${qty(g.picked, g.uom)} ${g.uom}` : `${qty(g.picked, g.uom)} ${g.uom}`}</td>
+                                    </tr>
+                                ))}
+                                {t.labels_qty > 0 && <tr className="border-t border-slate-100 bg-indigo-50/30"><td className="px-4 py-1.5 text-slate-500">L</td><td className="px-3 py-1.5 text-xs text-slate-500">—</td><td className="px-3 py-1.5 text-xs">Labels</td><td className="px-3 py-1.5 font-semibold text-slate-800">Garment barcode labels</td><td className="px-3 py-1.5 text-right tabular-nums font-bold">{t.labels_qty} pcs</td></tr>}
+                                <tr className="border-t-2 border-slate-200 bg-slate-50 text-xs font-bold text-slate-700"><td className="px-4 py-1.5" colSpan={4}>Total · {groups.length} item{groups.length === 1 ? '' : 's'}{t.labels_qty > 0 ? ' + garment labels' : ''} · {new Set(groups.map(stageKey)).size} stage(s)</td><td className="px-3 py-1.5 text-right">{groups.length + (t.labels_qty > 0 ? 1 : 0)} line(s)</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+                <div className="flex flex-wrap items-center gap-2 px-4 py-2.5 border-t border-slate-100">
+                    {isSample && KIT_OPEN.includes(t.status) && perm.prepare && isOpen && <PrimaryButton onClick={() => { setFormError(''); setHandOver({ kit: t, name: '', note: '' }); }}><HandHelping size={14} /> Hand over to sampling…</PrimaryButton>}
+                    {!isSample && t.status === 'READY' && perm.sign && <PrimaryButton onClick={() => navigate(`/v3/trim-kits/${t.id}`)}><PenLine size={14} /> Check &amp; sign</PrimaryButton>}
+                    {!isSample && t.status === 'READY' && perm.sign && <SecondaryButton onClick={() => askReason({ title: `Send ${t.kit_no} back to the store`, confirm: 'Send back', hint: 'The whole kit goes back (for a wrong or damaged item, count and mark that item instead — the good ones are signed).', run: (r) => trimKitsApi.kitSendBack(t.id, r) })}><RotateCcw size={14} /> Send back</SecondaryButton>}
+                    {!isSample && t.status === 'PREPARING' && perm.prepare && isOpen && <PrimaryButton busy={busy} disabled={busy} onClick={() => run(() => trimKitsApi.kitReady(t.id))}><PackageCheck size={14} /> Mark ready</PrimaryButton>}
+                    {t.status === 'PREPARING' && perm.prepare && isOpen && <SecondaryButton onClick={() => openEditor(t)}><Pencil size={14} /> Change…</SecondaryButton>}
+                    {KIT_OPEN.includes(t.status) && <SecondaryButton onClick={async () => exportPickList(k, await loadLetterhead(), t)}><FileDown size={14} /> Pick list</SecondaryButton>}
+                    {t.status === 'READY' && perm.prepare && <SecondaryButton onClick={() => run(() => trimKitsApi.kitUnready(t.id))}><Undo2 size={14} /> Pull back</SecondaryButton>}
+                    {KIT_OPEN.includes(t.status) && perm.prepare && <SecondaryButton onClick={() => askReason({ title: `Cancel ${t.kit_no}`, confirm: 'Cancel kit', hint: 'What is in the bag goes back on the shelf; the items stay owed on the trim order for another kit.', run: (r) => trimKitsApi.kitCancel(t.id, r) })}><Ban size={14} /> Cancel kit</SecondaryButton>}
+                    {t.status === 'SIGNED' && h && <span className="text-sm">{h.issue_id ? <Link to={`/v3/trim-orders/slips/${h.issue_id}`} className="font-bold text-indigo-700 hover:underline">{h.issue_no}</Link> : <b>garment labels only</b>}{h.store_override ? <span className="text-slate-600"> · to {h.received_by_name} (sampling) · recorded by the store</span> : null}{t.bill_no ? <span className="text-slate-600"> · valuation bill {t.bill_no}</span> : null}{h.partial ? <span className="text-slate-500"> · the rest of the trim order stays with the store</span> : null}</span>}
+                    {!isSample && t.status === 'READY' && !perm.sign && <span className="text-xs text-slate-500">Waiting for a line loader — the store writes {t.kit_no} on the bag.</span>}
+                </div>
+            </div>
+        );
+    };
 
     return (
         <div>
-            <Link to="/v3/trim-kits" className="inline-flex items-center gap-1 text-sm font-semibold text-slate-500 hover:text-indigo-600 mb-3"><ArrowLeft size={15} /> Trim kits</Link>
+            {isSample ? <Link to={`/v3/samples/${k.sample_request_id}`} className="inline-flex items-center gap-1 text-sm font-semibold text-slate-500 hover:text-indigo-600 mb-3"><ArrowLeft size={15} /> Sample {k.sample_request_no}</Link>
+                : <Link to="/v3/trim-orders" className="inline-flex items-center gap-1 text-sm font-semibold text-slate-500 hover:text-indigo-600 mb-3"><ArrowLeft size={15} /> Trim orders &amp; kits</Link>}
             <div className="flex flex-wrap items-center gap-3 mb-1">
-                <h1 className="text-2xl font-black text-slate-900">{k.kit_no}</h1>
-                <span className={`text-[11px] font-black px-2 py-0.5 rounded border ${KIT_STATUS[S].cls}`}>{KIT_STATUS[S].label}</span>
+                <h1 className="text-2xl font-black text-slate-900">{k.trim_order_no}</h1>
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Trim order</span>
+                {isSample && <Link to={`/v3/samples/${k.sample_request_id}`} className="text-[11px] font-black px-2 py-0.5 rounded border bg-violet-50 text-violet-800 border-violet-300 hover:underline">Sample · {k.sample_type}{k.sample_round > 1 ? ` round ${k.sample_round}` : ''} · {k.sample_request_no}</Link>}
+                <span className={`text-[11px] font-black px-2 py-0.5 rounded border ${(ORDER_STATUS[S] || ORDER_STATUS.OPEN).cls}`}>{(ORDER_STATUS[S] || ORDER_STATUS.OPEN).label}</span>
                 {pendingExtra.length > 0 && <span className="text-[11px] font-black px-2 py-0.5 rounded border bg-amber-50 text-amber-800 border-amber-300">extra line waiting for the merchandiser</span>}
                 {BC && !BC.seen_at && <span className="text-[11px] font-black px-2 py-0.5 rounded border bg-amber-50 text-amber-800 border-amber-300">BOM changed</span>}
             </div>
             <p className="text-sm text-slate-600 mb-1"><Link to={`/v3/orders/${k.order_id}`} className="font-semibold text-indigo-700 hover:underline">{k.order_no}</Link> · {k.customer_name}{k.batch_code ? <> · batch <b>#{k.floor_no}</b> {k.batch_code}</> : ''}</p>
-            {k.auto && <p className="text-xs text-slate-500 mb-1">Made when the batch was finalised: Order BOM × the garments cut, per colour × size — wastage on the order's garments, none on over-cut garments. The quantities can't be changed — put in what is there; the rest follows on the same kit.</p>}
-            <p className="text-sm mb-3">{k.batch_lines?.length ? <>Goes to: {k.batch_lines.map(l => <b key={l.id} className="mr-2 text-slate-800">{l.name} <span className="font-normal text-slate-500">({l.stage})</span></b>)}</> : <span className="text-slate-500">The batch is not on a sewing line yet — any line loader may sign for it.</span>}</p>
-            {k.history[0]?.action === 'SENT_BACK' && S !== 'READY' && <div className="mb-3 text-sm bg-rose-50 border border-rose-200 text-rose-900 rounded-lg px-3 py-2"><b>Sent back by the line{k.history[0].user_name ? ` (${k.history[0].user_name})` : ''}:</b> {k.history[0].reason} — correct the kit and put it in again.</div>}
-            {remadeAt && !BC && <p className="mb-2 text-xs text-sky-800">Remade from the order's BOM on {new Date(remadeAt).toLocaleString('en-IN')} — the BOM changed before anything was picked (see History).</p>}
+            {k.auto && <p className="text-xs text-slate-500 mb-1">Made when the batch was finalised: Order BOM × the garments cut, per colour × size — wastage on the order's garments, none on over-cut garments. The quantities can't be changed; the store hands them in kits — one or many, stage by stage.</p>}
+            {isSample ? <p className="text-sm mb-3 text-slate-600">For sampling — Order BOM × the sample garments, <b>from free stock</b> (never the order's reservation). The store prepares a kit and hands it to sampling, typing who took it; lines can be changed with a reason.</p>
+            : <p className="text-sm mb-3">{k.batch_lines?.length ? <>Batch is on: {k.batch_lines.map(l => <b key={l.id} className="mr-2 text-slate-800">{l.name} <span className="font-normal text-slate-500">({l.stage})</span></b>)}</> : <span className="text-slate-500">The batch is not on a sewing line yet — any line loader may sign for a kit.</span>}</p>}
+            {remadeAt && !BC && <p className="mb-2 text-xs text-sky-800">Remade from the order's BOM on {new Date(remadeAt).toLocaleString('en-IN')} — the BOM changed before any kit was made (see History).</p>}
             {BC && (BC.seen_at ? (
-                <p className="mb-3 text-xs text-slate-600"><b>Order BOM changed</b> on {new Date(BC.at).toLocaleString('en-IN')} after this kit was started — dealt with{k.bom_change_seen_by_name ? ` by ${k.bom_change_seen_by_name}` : ''} on {new Date(BC.seen_at).toLocaleString('en-IN')}{BC.seen_note ? `: ${BC.seen_note}` : ''}.</p>
+                <p className="mb-3 text-xs text-slate-600"><b>Order BOM changed</b> on {new Date(BC.at).toLocaleString('en-IN')} after this trim order was started — dealt with{k.bom_change_seen_by_name ? ` by ${k.bom_change_seen_by_name}` : ''} on {new Date(BC.seen_at).toLocaleString('en-IN')}{BC.seen_note ? `: ${BC.seen_note}` : ''}.</p>
             ) : (
                 <div className="mb-3 text-sm bg-amber-50 border border-amber-300 text-amber-950 rounded-lg px-3 py-2">
-                    <p className="font-bold">The order's BOM changed on {new Date(BC.at).toLocaleString('en-IN')}{BC.reason ? ` (${BC.reason})` : ''} after this kit was started — nothing on the kit was changed.</p>
+                    <p className="font-bold">The order's BOM changed on {new Date(BC.at).toLocaleString('en-IN')}{BC.reason ? ` (${BC.reason})` : ''} after this trim order was started — nothing on it was changed.</p>
                     <p className="text-xs mb-1.5">For what is now missing, ask for an extra line (the merchandiser approves); tell the line about items no longer on the BOM. Then mark it dealt with.</p>
-                    <table className="w-full text-xs bg-white/60 rounded">
-                        <thead className="text-left font-bold text-amber-900/70 uppercase tracking-wider"><tr><th className="px-2 py-1">Item</th><th className="px-2 py-1 text-right">In the kit</th><th className="px-2 py-1 text-right">BOM now</th><th className="px-2 py-1 text-right">Change</th></tr></thead>
+                    <button type="button" onClick={() => toggle('bom')} className="text-xs font-bold text-amber-900 hover:underline">{isShown('bom') ? '▾' : '▸'} {BC.diffs.length} change{BC.diffs.length === 1 ? '' : 's'} — {BC.diffs.filter(d => d.kind === 'NEW').length} new · {BC.diffs.filter(d => d.kind === 'GONE').length} no longer on the BOM · {BC.diffs.filter(d => d.kind !== 'NEW' && d.kind !== 'GONE').length} quantity changed</button>
+                    {isShown('bom') && <table className="w-full text-xs bg-white/60 rounded mt-1">
+                        <thead className="text-left font-bold text-amber-900/70 uppercase tracking-wider"><tr><th className="px-2 py-1">Item</th><th className="px-2 py-1 text-right">On the trim order</th><th className="px-2 py-1 text-right">BOM now</th><th className="px-2 py-1 text-right">Change</th></tr></thead>
                         <tbody>{BC.diffs.map((d, i) => (
                             <tr key={i} className="border-t border-amber-200">
                                 <td className="px-2 py-1">{d.label}{d.part !== 'ORDER' ? <span className="text-amber-800"> · over-cut</span> : null}{d.kind === 'NEW' ? <b className="ml-1 text-emerald-700">new</b> : d.kind === 'GONE' ? <b className="ml-1 text-rose-700">no longer on the BOM</b> : null}</td>
@@ -224,109 +331,211 @@ function KitView({ id }) {
                                 <td className={`px-2 py-1 text-right tabular-nums font-bold ${d.change > 0 ? 'text-emerald-700' : 'text-rose-700'}`}>{d.change > 0 ? '+' : ''}{qty(d.change, d.uom)} {d.uom}</td>
                             </tr>
                         ))}</tbody>
-                    </table>
-                    {perm.prepare && <div className="mt-2"><SecondaryButton onClick={() => askReason({ title: 'BOM change dealt with', confirm: 'Mark as dealt with', label: 'Note', optional: true, hint: 'Say what was done (extra line asked, nothing needed …). The notice stays on the kit as a record.', run: (t) => trimKitsApi.bomChangeSeen(id, t || undefined) })}>Mark as dealt with</SecondaryButton></div>}
+                    </table>}
+                    {perm.prepare && <div className="mt-2"><SecondaryButton onClick={() => askReason({ title: 'BOM change dealt with', confirm: 'Mark as dealt with', label: 'Note', optional: true, hint: 'Say what was done (extra line asked, nothing needed …). The notice stays on the trim order as a record.', run: (t) => trimKitsApi.bomChangeSeen(id, t || undefined) })}>Mark as dealt with</SecondaryButton></div>}
                 </div>
             ))}
-            {S === 'READY' && <p className="mb-3 text-sm text-emerald-800">Ready for pickup{k.ready_by_name ? ` — put in by ${k.ready_by_name}` : ''}{k.ready_at ? ` on ${new Date(k.ready_at).toLocaleString('en-IN')}` : ''}. {perm.sign ? 'Count each line, then sign.' : 'Waiting for the line loader.'}</p>}
-            {(S === 'CLOSED' || S === 'CANCELLED') && <p className="mb-3 text-sm text-slate-600"><b>{KIT_STATUS[S].label}</b>{k.closed_by_name ? ` by ${k.closed_by_name}` : ''}: {k.close_reason}</p>}
+            {(S === 'CLOSED' || S === 'CANCELLED') && <p className="mb-3 text-sm text-slate-600"><b>{ORDER_STATUS[S].label}</b>{k.closed_by_name ? ` by ${k.closed_by_name}` : ''}: {k.close_reason}</p>}
 
             <div className="flex flex-wrap gap-2 mb-3">
-                {perm.sign && S === 'READY' && <PrimaryButton onClick={openCount}><PenLine size={14} /> Count &amp; sign</PrimaryButton>}
-                {perm.sign && S === 'READY' && <SecondaryButton onClick={() => askReason({ title: `Send ${k.kit_no} back to the store`, confirm: 'Send back', hint: 'The whole kit goes back (for a wrong or damaged line, count and mark that line instead — the good lines are signed).', run: (r) => trimKitsApi.sendBack(id, r) })}><RotateCcw size={14} /> Send the whole kit back</SecondaryButton>}
-                {perm.prepare && ['DRAFT', 'PARTLY_ISSUED'].includes(S) && open.length > 0 && <SecondaryButton onClick={async () => exportPickList(k, await loadLetterhead())}><FileDown size={14} /> Pick list</SecondaryButton>}
+                {canKit && <PrimaryButton onClick={() => openEditor(null)}><PackagePlus size={14} /> New kit…</PrimaryButton>}
+                {perm.prepare && isOpen && canNow.length > 0 && <SecondaryButton onClick={async () => exportPickList(k, await loadLetterhead())}><FileDown size={14} /> What can go in now (PDF)</SecondaryButton>}
                 {LB && <SecondaryButton onClick={() => setLabelsOpen(true)}><Tag size={14} /> Garment labels {LB.printed}/{LB.qty}</SecondaryButton>}
-                {perm.prepare && ['DRAFT', 'PARTLY_ISSUED'].includes(S) && canPick && <PrimaryButton onClick={openPick}><PackageCheck size={14} /> {S === 'PARTLY_ISSUED' ? 'Put the rest in the kit…' : 'Put in the kit…'}</PrimaryButton>}
-                {perm.prepare && S === 'READY' && <SecondaryButton onClick={() => run(() => trimKitsApi.unready(id))}><Undo2 size={14} /> Pull back</SecondaryButton>}
-                {perm.prepare && ['DRAFT', 'PARTLY_ISSUED'].includes(S) && <SecondaryButton onClick={() => askReason({ title: S === 'DRAFT' ? `Cancel ${k.kit_no}` : `Close ${k.kit_no}`, confirm: S === 'DRAFT' ? 'Cancel kit' : 'Close kit', hint: S === 'DRAFT' ? 'Nothing was handed over. Say why the batch\'s kit is not needed.' : 'What was handed stays issued; the rest will not be handed. Say why (it shows in the trim reconciliation).', run: (r) => trimKitsApi.close(id, r) })}><Ban size={14} /> {S === 'DRAFT' ? 'Cancel' : 'Close'}</SecondaryButton>}
+                {isSample && perm.prepare && (isOpen || S === 'ISSUED') && <SecondaryButton onClick={openChange}><ListPlus size={14} /> Change lines…</SecondaryButton>}
+                {!isSample && perm.prepare && isOpen && <SecondaryButton onClick={closeOrder}><Ban size={14} /> {k.handovers.length ? 'Close trim order' : 'Cancel trim order'}</SecondaryButton>}
             </div>
             <ErrorBox text={error} />
 
-            <CutSummary k={k} rows={rows} />
-            <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto mb-4">
-                <table className="w-full text-sm min-w-[1100px]">
+            {/* Kits (26 Nov 2026): the bags the store prepares on this trim order — several can be ready at once */}
+            <div className="mb-4">
+                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-2">
+                    <h2 className="text-lg font-black text-slate-900">Kits</h2>
+                    <span className="text-sm text-slate-600">{liveKits.length ? [[nKits('READY'), 'ready for pickup'], [nKits('PREPARING'), 'being prepared'], [nKits('SIGNED'), 'signed']].filter(([n]) => n).map(([n, t]) => `${n} ${t}`).join(' · ') : 'No kit made yet.'}</span>
+                    {isOpen && perm.prepare && !canKit && toKitRows.length > 0 && <span className="text-xs text-rose-700 font-semibold">Nothing can go in a new kit now — {causeText(missing) || 'waiting for stock'}.</span>}
+                </div>
+                {liveKits.length > 0 ? <div className="space-y-3">{liveKits.map(KitCard)}</div>
+                    : isOpen && <p className="text-sm text-slate-500 bg-white border border-dashed border-slate-300 rounded-xl p-4">{canKit ? <>Make the first kit: <b>New kit…</b> — tick what goes in this bag (one stage, or all that can go in), save, print its pick list and write the kit number on the bag.</> : 'Nothing can go in a kit yet — see "Not in a kit yet" below.'}</p>}
+                {cancelledKits.length > 0 && (
+                    <div className="mt-2">
+                        <button type="button" onClick={() => setShowCancelled(v => !v)} className="text-xs font-bold text-slate-500 hover:text-indigo-700">{showCancelled ? '▾' : '▸'} {cancelledKits.length} cancelled kit{cancelledKits.length === 1 ? '' : 's'}</button>
+                        {showCancelled && <div className="mt-2 space-y-2">{cancelledKits.map(KitCard)}</div>}
+                    </div>
+                )}
+            </div>
+
+            {unreserved.length > 0 && isOpen && (
+                <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900 flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <b>{unreserved.length} item{unreserved.length === 1 ? ' is' : 's are'} not reserved for {k.order_no}</b>
+                    <span>— {unreserved.length === 1 ? 'it waits' : 'they wait'} (the line loader's signing needs the reservation). Reserve on the Order BOM (Allocate) and {unreserved.length === 1 ? 'it goes' : 'they go'} in the next kit.</span>
+                    <Link to={bomLink} className="ml-auto font-bold text-rose-800 underline whitespace-nowrap">Order BOM — reserve →</Link>
+                </div>
+            )}
+            <button type="button" aria-expanded={isShown('lines')} onClick={() => toggle('lines')} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-2 text-left group">
+                <h2 className="text-lg font-black text-slate-900 group-hover:text-indigo-700">{isShown('lines') ? '▾' : '▸'} Trim order lines</h2>
+                <span className="text-sm text-slate-600">{[
+                    `${rows.length + (LB ? 1 : 0)} item(s)`,
+                    rows.some(g => g.over_qty > 0) ? `${rows.filter(g => g.over_qty > 0).length} with over-cut` : '',
+                    `${rows.filter(g => g.issued > 0).length + (LB && LB.issued > 0 ? 1 : 0)} handed`,
+                    `${rows.filter(g => g.in_kits > 0).length + (LB && LB.picked > 0 ? 1 : 0)} in kits`,
+                    `${toKitRows.length + (LB && LB.remaining - LB.picked > 0 ? 1 : 0)} not in a kit yet`,
+                ].filter(Boolean).join(' · ')}{(() => { const t = [rows.filter(g => g.stock_on_hand <= 0 && g.to_kit > 0).length ? `${rows.filter(g => g.stock_on_hand <= 0 && g.to_kit > 0).length} not in store` : '', unreserved.length ? `${unreserved.length} not reserved` : ''].filter(Boolean).join(' · '); return t ? <> · <b className="text-rose-700">{t}</b></> : null; })()}</span>
+            </button>
+            {isShown('lines') && <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto mb-4">
+                <table className="w-full text-sm min-w-[1180px]">
                     <thead className="text-xs font-bold text-slate-500 uppercase tracking-wider bg-slate-50 text-right">
-                        <tr><th className="px-3 py-2 text-left">#</th><th className="px-3 py-2 text-left">Item</th><th className="px-3 py-2">For the order</th><th className="px-3 py-2">Over-cut</th><th className="px-3 py-2">Total in the kit</th><th className="px-3 py-2">Handed over</th><th className="px-3 py-2">Still owed</th><th className="px-3 py-2">In store</th><th className="px-3 py-2 text-left">Last pick / count</th><th className="px-3 py-2" /></tr>
+                        <tr><th className="px-3 py-2 text-left">#</th><th className="px-3 py-2 text-left">Item</th><th className="px-3 py-2">For the order</th><th className="px-3 py-2">Over-cut</th><th className="px-3 py-2">Total</th><th className="px-3 py-2">Handed over</th><th className="px-3 py-2" title="In kits being prepared or ready">In kits</th><th className="px-3 py-2">Not in a kit yet</th><th className="px-3 py-2">In store</th><th className="px-3 py-2" title="What the order has reserved for this item — the line loader's signing needs it">Reserved for the order</th><th className="px-3 py-2 text-left">Last pick / count</th><th className="px-3 py-2" /></tr>
                     </thead>
                     <tbody>
-                        {rows.map(g => {
-                            const req = pendingExtra.find(r => g.lines.some(l => l.id === r.replaces_line_id));
-                            const head = g.lines.find(l => l.part === 'ORDER' && l.remaining > 0) || g.lines.find(l => l.remaining > 0 && l.part !== 'EXTRA');
-                            const replaced = g.lines.find(l => l.replaced_by_line_id);
-                            const notes = g.lines.filter(l => (l.pick && l.pick.short > 0 && l.remaining > 0) || (l.count && l.count.issue !== 'OK'));
-                            const shortStore = g.remaining > 0 && g.stock_on_hand > 0 && g.stock_on_hand + 1e-9 < g.remaining;
-                            const shortFree = g.over_remaining > 0 && g.stock_free + 1e-9 < g.over_remaining;
-                            return (
-                                <tr key={g.key} className={`border-t border-slate-100 text-right tabular-nums align-top ${replaced && g.remaining === 0 ? 'bg-slate-50 text-slate-500' : ''}`}>
-                                    <td className="px-3 py-2 text-left">{g.line_no}</td>
-                                    <td className="px-3 py-2 text-left"><span className="font-semibold text-slate-800">{g.label}</span>
-                                        {g.extra && <span className="ml-1 text-[10px] font-black px-1.5 py-0.5 rounded border bg-violet-50 text-violet-800 border-violet-300">extra line · free stock{g.lines[0].replaces_line_id ? ` · replaces line ${k.lines.find(x => x.id === g.lines[0].replaces_line_id)?.line_no}` : ''}</span>}
-                                        {replaced && <span className="ml-1 text-[10px] font-black px-1.5 py-0.5 rounded border bg-slate-100 text-slate-600 border-slate-300">closed — replaced by line {k.lines.find(x => x.id === replaced.replaced_by_line_id)?.line_no}</span>}
-                                        <span className="block text-xs text-slate-500">{g.type_name}{g.lines.some(l => l.basis?.cells?.length) ? <> · <button type="button" className="text-indigo-700 hover:underline" onClick={() => setBasis(g)}>how it's worked out</button></> : null}</span></td>
-                                    <td className="px-3 py-2">{g.order_qty > 0 ? handout(g, g.order_qty) : '—'}</td>
-                                    <td className={`px-3 py-2 ${g.over_qty > 0 ? 'text-sky-800' : 'text-slate-300'}`}>{g.over_qty > 0 ? handout(g, g.over_qty) : '—'}
-                                        {g.over_qty > 0 && <span className="block text-[11px] text-slate-500">{g.over_free_qty > 0 ? `free limit ${qty(g.over_free_qty, g.uom)}` : ''}{g.over_free_qty > 0 && g.over_limit_qty > 0 ? ' · ' : ''}{g.over_limit_qty > 0 ? `above it ${qty(g.over_limit_qty, g.uom)}` : ''}</span>}</td>
-                                    <td className="px-3 py-2 font-bold">{handout(g, g.qty)}{g.closed > 0 && <span className="block text-[11px] font-normal text-slate-500">closed {qty(g.closed, g.uom)}</span>}</td>
-                                    <td className="px-3 py-2">{g.issued ? `${qty(g.issued, g.uom)} ${g.uom}` : '—'}</td>
-                                    <td className={`px-3 py-2 ${g.remaining > 0 ? 'text-amber-800 font-semibold' : 'text-slate-400'}`}>{g.remaining > 0 ? handout(g, g.remaining) : '—'}{g.picked > 0 && <span className="block text-[11px] font-bold text-emerald-700">in the kit now: {g.in_units ? `${g.picked_units} ${g.purchase_uom}` : `${qty(g.picked, g.uom)} ${g.uom}`}</span>}</td>
-                                    <td className="px-3 py-2 text-xs">{qty(g.stock_on_hand, g.uom)} {g.uom}
-                                        {g.stock_on_hand <= 0 && g.remaining > 0 && <span className="block font-black text-rose-700">not in store</span>}
-                                        {shortStore && <span className="block font-bold text-amber-800">short for the kit</span>}
-                                        {shortFree && <span className="block text-amber-800" title="over-cut is handed from free stock (not allocated to any order)">free stock {qty(Math.max(0, g.stock_free), g.uom)} — over-cut short</span>}
-                                        {g.on_order && g.remaining > 0 && (g.stock_on_hand + 1e-9 < g.remaining) && <span className="block text-slate-600">on order {qty(g.on_order.qty, g.on_order.uom)} {g.on_order.uom} · {g.on_order.pos}{g.on_order.due ? ` · due ${new Date(g.on_order.due).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}` : ''}</span>}
-                                        {!g.on_order && g.remaining > 0 && g.stock_on_hand + 1e-9 < g.remaining && <span className="block text-rose-700">not on any open PO</span>}</td>
-                                    <td className="px-3 py-2 text-left text-xs">
-                                        {notes.map(l => (
-                                            <span key={l.id} className="block">
-                                                {g.lines.length > 1 && <span className="text-slate-400">{isOver(l) ? 'over-cut: ' : 'order: '}</span>}
-                                                {l.pick && l.pick.short > 0 && l.remaining > 0 && <span className="text-amber-800"><b>{qty(l.pick.short, l.uom)} short</b> — {SHORT_REASON[l.pick.reason]}{l.pick.note ? ` (${l.pick.note})` : ''}{l.pick.adjusted ? ` · stock −${qty(l.pick.adjusted, l.uom)}` : ''} </span>}
-                                                {l.count && l.count.issue !== 'OK' && <span className={['WRONG_ITEM', 'DAMAGED', 'SHORT'].includes(l.count.issue) ? 'text-rose-700' : 'text-slate-600'}>loader: <b>{COUNT_ISSUE[l.count.issue]}</b>{l.count.issue === 'SHORT' ? ` (${qty(l.count.counted, l.uom)} of ${qty(l.count.picked, l.uom)})` : l.count.issue === 'DAMAGED' ? ` (${qty(l.count.damaged, l.uom)})` : ''}{l.count.note ? ` — ${l.count.note}` : ''}</span>}
-                                            </span>
-                                        ))}
-                                        {req && <span className="block text-violet-800">extra line asked: {req.label} {qty(req.qty, req.uom)} {req.uom}</span>}
-                                    </td>
-                                    <td className="px-3 py-2 text-right whitespace-nowrap">{perm.prepare && ['DRAFT', 'PARTLY_ISSUED'].includes(S) && head && !req && (
-                                        <button type="button" className="text-xs font-bold text-violet-700 hover:underline inline-flex items-center gap-1" onClick={() => { setFormError(''); setExtra({ line: head, search: '', items: null, item_id: '', qty: '', reason: head.pick?.reason ? SHORT_REASON[head.pick.reason] : '' }); searchItems(''); }}><Replace size={12} /> Extra line…</button>)}</td>
-                                </tr>
-                            );
-                        })}
+                        {rows.filter(g => !waitKeys.has(g.key)).flatMap((g, i, arr) => (i === 0 || stageKey(arr[i - 1]) !== stageKey(g)
+                            ? [{ key: `__st-${stageKey(g)}`, stageHead: stageName(g), n: arr.filter(x => stageKey(x) === stageKey(g)).length }, g] : [g]))
+                            .map(g => {
+                                if (g.stageHead) return (
+                                    <tr key={g.key} className="border-t-2 border-slate-200 bg-slate-100/70">
+                                        <td className="px-3 py-1.5 text-left text-xs font-black uppercase tracking-wider text-slate-700" colSpan={12}>{g.stageHead} <span className="ml-2 font-normal normal-case tracking-normal text-slate-500">{g.n} item{g.n === 1 ? '' : 's'}</span></td>
+                                    </tr>
+                                );
+                                const req = pendingExtra.find(r => g.lines.some(l => l.id === r.replaces_line_id));
+                                const head = extraFor(g);
+                                const replaced = g.lines.find(l => l.replaced_by_line_id);
+                                const notes = g.lines.filter(l => (l.pick && l.pick.short > 0 && l.to_kit > 0) || (l.count && l.count.issue !== 'OK'));
+                                const cp = pickCaps(g);
+                                const shortFree = g.over_remaining > 0 && g.stock_free + 1e-9 < g.over_remaining;
+                                const kitsOf = kits.filter(t => KIT_OPEN.includes(t.status) && t.lines.some(kl => g.lines.some(l => l.id === kl.order_line_id)));
+                                return (
+                                    <tr key={g.key} className={`border-t border-slate-100 text-right tabular-nums align-top ${replaced && g.remaining === 0 ? 'bg-slate-50 text-slate-500' : ''}`}>
+                                        <td className="px-3 py-2 text-left">{g.line_no}</td>
+                                        <td className="px-3 py-2 text-left"><span className="font-semibold text-slate-800">{g.label}</span>
+                                            {g.extra && <span className="ml-1 text-[10px] font-black px-1.5 py-0.5 rounded border bg-violet-50 text-violet-800 border-violet-300">extra line · free stock{g.lines[0].replaces_line_id ? ` · replaces line ${lineOf.get(g.lines[0].replaces_line_id)?.line_no}` : ''}</span>}
+                                            {replaced && <span className="ml-1 text-[10px] font-black px-1.5 py-0.5 rounded border bg-slate-100 text-slate-600 border-slate-300">closed — replaced by line {lineOf.get(replaced.replaced_by_line_id)?.line_no}</span>}
+                                            {g.lines.filter(l => l.changed_reason).map(l => <span key={l.id} className="block text-[11px] text-violet-700">changed by the store: {l.changed_reason}</span>)}
+                                            <span className="block text-xs text-slate-500">{g.type_name}{g.lines.some(l => l.basis?.cells?.length) ? <> · <button type="button" className="text-indigo-700 hover:underline" onClick={() => setBasis(g)}>how it's worked out</button></> : null}</span></td>
+                                        <td className="px-3 py-2">{g.order_qty > 0 ? handout(g, g.order_qty) : '—'}</td>
+                                        <td className={`px-3 py-2 ${g.over_qty > 0 ? 'text-sky-800' : 'text-slate-300'}`}>{g.over_qty > 0 ? handout(g, g.over_qty) : '—'}
+                                            {g.over_qty > 0 && <span className="block text-[11px] text-slate-500">{g.over_free_qty > 0 ? `free limit ${qty(g.over_free_qty, g.uom)}` : ''}{g.over_free_qty > 0 && g.over_limit_qty > 0 ? ' · ' : ''}{g.over_limit_qty > 0 ? `above it ${qty(g.over_limit_qty, g.uom)}` : ''}</span>}</td>
+                                        <td className="px-3 py-2 font-bold">{handout(g, g.qty)}{g.closed > 0 && <span className="block text-[11px] font-normal text-slate-500">closed {qty(g.closed, g.uom)}</span>}</td>
+                                        <td className="px-3 py-2">{g.issued ? `${qty(g.issued, g.uom)} ${g.uom}` : '—'}</td>
+                                        <td className={`px-3 py-2 ${g.in_kits > 0 ? 'text-emerald-800 font-semibold' : 'text-slate-300'}`}>{g.in_kits > 0 ? handout(g, g.in_kits) : '—'}
+                                            {kitsOf.length > 0 && <span className="block text-[11px] font-normal text-slate-500">{kitsOf.map(t => `-${t.kit_seq}`).join(', ')}</span>}</td>
+                                        <td className={`px-3 py-2 ${g.to_kit > 0 ? 'text-amber-800 font-semibold' : 'text-slate-400'}`}>{g.to_kit > 0 ? handout(g, g.to_kit) : '—'}
+                                            {g.to_kit > 0 && (cp.total > 0
+                                                ? <span className="block text-[11px] font-bold text-emerald-700">can go in now: {g.in_units ? `${cp.total} ${g.purchase_uom}` : `${qty(cp.total, g.uom)} ${g.uom}`}</span>
+                                                : <span className="block text-[11px] font-bold text-rose-700">waits — {waitCause(cp.cause || 'stock')}</span>)}</td>
+                                        <td className="px-3 py-2 text-xs">{qty(g.stock_on_hand, g.uom)} {g.uom}
+                                            {g.stock_on_hand <= 0 && g.to_kit > 0 && <span className="block font-black text-rose-700">not in store</span>}
+                                            {shortFree && <span className="block text-amber-800" title="over-cut is handed from free stock (not allocated to any order)">free stock {qty(Math.max(0, g.stock_free), g.uom)} — over-cut short</span>}
+                                            {g.on_order && g.to_kit > 0 && cp.total + 1e-9 < (g.in_units ? g.units_to_kit : g.to_kit) && <span className="block text-slate-600">on order {qty(g.on_order.qty, g.on_order.uom)} {g.on_order.uom} · {g.on_order.pos}{g.on_order.due ? ` · due ${new Date(g.on_order.due).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}` : ''}</span>}</td>
+                                        <td className="px-3 py-2 text-xs">{g.extra ? <span className="text-slate-400">free stock</span> : <>{qty(reservedOf(g), g.uom)} {g.uom}
+                                            {notReserved(g) && <span className="block font-black text-rose-700">{reservedOf(g) > 0 ? `short ${qty(resGap(g, orderOwed(g)), g.uom)} ${g.uom}` : 'not reserved'}</span>}</>}</td>
+                                        <td className="px-3 py-2 text-left text-xs">
+                                            {notes.map(l => (
+                                                <span key={l.id} className="block">
+                                                    {g.lines.length > 1 && <span className="text-slate-400">{isOver(l) ? 'over-cut: ' : 'order: '}</span>}
+                                                    {l.pick && l.pick.short > 0 && l.to_kit > 0 && <span className="text-amber-800"><b>{qty(l.pick.short, l.uom)} short</b> — {SHORT_REASON[l.pick.reason]}{l.pick.note ? ` (${l.pick.note})` : ''}{l.pick.adjusted ? ` · stock −${qty(l.pick.adjusted, l.uom)}` : ''} </span>}
+                                                    {l.count && l.count.issue !== 'OK' && <span className={['WRONG_ITEM', 'DAMAGED', 'SHORT', 'OTHER'].includes(l.count.issue) ? 'text-rose-700' : 'text-slate-600'}>loader: <b>{COUNT_ISSUE[l.count.issue]}</b>{l.count.issue === 'SHORT' ? ` (${qty(l.count.counted, l.uom)} of ${qty(l.count.picked, l.uom)})` : l.count.issue === 'DAMAGED' ? ` (${qty(l.count.damaged, l.uom)})` : ''}{l.count.note ? ` — ${l.count.note}` : ''}</span>}
+                                                </span>
+                                            ))}
+                                            {req && <span className="block text-violet-800">extra line asked: {req.label} {qty(req.qty, req.uom)} {req.uom}</span>}
+                                        </td>
+                                        <td className="px-3 py-2 text-right whitespace-nowrap">{!isSample && perm.prepare && isOpen && head && !req && (
+                                            <button type="button" className="text-xs font-bold text-violet-700 hover:underline inline-flex items-center gap-1" onClick={() => openExtra(head)}><Replace size={12} /> Extra line…</button>)}</td>
+                                    </tr>
+                                );
+                            })}
                         {LB && (
                             <tr className="border-t border-slate-100 text-right tabular-nums align-top bg-indigo-50/30">
                                 <td className="px-3 py-2 text-left">L</td>
                                 <td className="px-3 py-2 text-left"><span className="font-semibold text-slate-800">Garment barcode labels</span>
                                     <span className="ml-1 text-[10px] font-black px-1.5 py-0.5 rounded border bg-indigo-50 text-indigo-700 border-indigo-200">printed by the store · no stock</span>
-                                    <span className="block text-xs text-slate-500">One per garment · <button type="button" className="text-indigo-700 hover:underline" onClick={() => setLabelsOpen(true)}>{perm.prepare ? 'print / reprint…' : 'see the labels'}</button></span></td>
+                                    <span className="block text-xs text-slate-500">One per garment · the store chooses the kit they go in · <button type="button" className="text-indigo-700 hover:underline" onClick={() => setLabelsOpen(true)}>{perm.prepare ? 'print / reprint…' : 'see the labels'}</button></span></td>
                                 <td className="px-3 py-2">{LB.qty} pcs</td>
                                 <td className="px-3 py-2 text-slate-300">—</td>
                                 <td className="px-3 py-2 font-bold">{LB.qty} pcs</td>
                                 <td className="px-3 py-2">{LB.issued ? `${LB.issued} pcs` : '—'}</td>
-                                <td className={`px-3 py-2 ${LB.remaining > 0 ? 'text-amber-800 font-semibold' : 'text-slate-400'}`}>{LB.remaining > 0 ? `${LB.remaining} pcs` : '—'}{LB.picked > 0 && <span className="block text-[11px] font-bold text-emerald-700">in the kit now: {LB.picked}</span>}</td>
+                                <td className={`px-3 py-2 ${LB.picked > 0 ? 'text-emerald-800 font-semibold' : 'text-slate-300'}`}>{LB.picked > 0 ? `${LB.picked} pcs` : '—'}</td>
+                                <td className={`px-3 py-2 ${LB.remaining - LB.picked > 0 ? 'text-amber-800 font-semibold' : 'text-slate-400'}`}>{LB.remaining - LB.picked > 0 ? `${LB.remaining - LB.picked} pcs` : '—'}
+                                    {LB.available_for_kit > 0 && <span className="block text-[11px] font-bold text-emerald-700">can go in now: {LB.available_for_kit}</span>}</td>
                                 <td className="px-3 py-2 text-xs">{LB.printed} printed</td>
-                                <td className="px-3 py-2 text-left text-xs">{LB.remaining > 0 && LB.available < LB.remaining ? <span className="text-amber-800">{LB.remaining - LB.available} not printed yet</span> : null}</td>
+                                <td className="px-3 py-2 text-left text-xs" colSpan={2}>{LB.remaining - LB.picked > LB.available_for_kit ? <span className="text-amber-800">{LB.remaining - LB.picked - LB.available_for_kit} not printed yet</span> : null}</td>
                                 <td className="px-3 py-2" />
                             </tr>
                         )}
                         <tr className="border-t-2 border-slate-200 bg-slate-50 text-xs font-bold text-slate-700 text-right">
-                            <td className="px-3 py-2 text-left" colSpan={2}>Total · {rows.length + (LB ? 1 : 0)} item(s){rows.some(g => g.over_qty > 0) ? ` · ${rows.filter(g => g.over_qty > 0).length} with over-cut` : ''}</td>
-                            <td className="px-3 py-2" colSpan={3}>{rows.filter(g => g.issued > 0).length} handed (fully or in part)</td>
-                            <td className="px-3 py-2" colSpan={2}><span className="text-amber-800">{openRows.length + (LB && LB.remaining > 0 ? 1 : 0)} still owed</span>{picked.length + (LB && LB.picked > 0 ? 1 : 0) ? ` · ${groupKitLines(picked).length + (LB && LB.picked > 0 ? 1 : 0)} in the kit now` : ''}</td>
-                            <td className="px-3 py-2 text-rose-700" colSpan={3}>{rows.filter(g => g.stock_on_hand <= 0 && g.remaining > 0).length ? `${rows.filter(g => g.stock_on_hand <= 0 && g.remaining > 0).length} not in store` : ''}</td>
+                            <td className="px-3 py-2 text-left" colSpan={2}>Total · {rows.length - waitKeys.size + (LB ? 1 : 0)} item(s){rows.some(g => g.over_qty > 0) ? ` · ${rows.filter(g => g.over_qty > 0).length} with over-cut` : ''}{waitKeys.size ? ` · ${waitKeys.size} more below, not in a kit yet` : ''}</td>
+                            <td className="px-3 py-2" colSpan={4}>{rows.filter(g => g.issued > 0).length} handed (fully or in part)</td>
+                            <td className="px-3 py-2 text-emerald-800">{rows.filter(g => g.in_kits > 0).length + (LB && LB.picked > 0 ? 1 : 0)} in kits</td>
+                            <td className="px-3 py-2 text-amber-800">{toKitRows.length + (LB && LB.remaining - LB.picked > 0 ? 1 : 0)} not in a kit yet</td>
+                            <td className="px-3 py-2 text-rose-700" colSpan={4}>{[rows.filter(g => g.stock_on_hand <= 0 && g.to_kit > 0).length ? `${rows.filter(g => g.stock_on_hand <= 0 && g.to_kit > 0).length} not in store` : '', unreserved.length ? `${unreserved.length} not reserved` : ''].filter(Boolean).join(' · ')}</td>
                         </tr>
                     </tbody>
                 </table>
-            </div>
+            </div>}
+            {!isShown('lines') && <div className="mb-4" />}
+
+            {missing.length > 0 && (
+                // Not in a kit yet (26 Nov 2026, owner: "also add list of items not in store in pdf as well as kit page"): every
+                // item — or the part of it — that can't go in a kit now, with why and what is on order; the store chases it here.
+                <div className="bg-white border border-rose-200 rounded-xl overflow-x-auto mb-4">
+                    <div className={`flex flex-wrap items-baseline gap-x-3 gap-y-1 px-4 py-2.5 bg-rose-50/60 ${isShown('missing') ? 'border-b border-rose-100' : ''}`}>
+                        <button type="button" aria-expanded={isShown('missing')} onClick={() => toggle('missing')} className="font-bold text-slate-800 hover:text-indigo-700 text-left">{isShown('missing') ? '▾' : '▸'} Not in a kit yet — {missing.length} item{missing.length === 1 ? '' : 's'}</button>
+                        <span className="text-xs text-slate-600">can't go in a kit now · still owed on the trim order · {missingText} · {missing.filter(x => x.g.on_order).length} on order · {missing.filter(x => !x.g.on_order && (x.cp.cause || 'stock') !== 'res').length} not on any PO</span>
+                        {missing.some(x => (x.cp.cause || 'stock') === 'res') && <Link to={bomLink} className="ml-auto text-xs font-bold text-indigo-700 hover:underline">Order BOM — reserve →</Link>}
+                    </div>
+                    {isShown('missing') && <table className="w-full text-sm min-w-[1000px]">
+                        <thead className="text-xs font-bold text-slate-500 uppercase tracking-wider bg-slate-50 text-right"><tr>
+                            <th className="px-3 py-2 text-left">#</th><th className="px-3 py-2 text-left">Stage</th><th className="px-3 py-2 text-left">Item</th><th className="px-3 py-2">Not in a kit</th><th className="px-3 py-2">Waits</th>
+                            <th className="px-3 py-2 text-left">Why</th><th className="px-3 py-2">In store</th><th className="px-3 py-2">Reserved</th><th className="px-3 py-2 text-left">On order</th><th className="px-3 py-2" /></tr></thead>
+                        <tbody>{missing.map(({ g, cp, waitQty }) => {
+                            const req = pendingExtra.find(r => g.lines.some(l => l.id === r.replaces_line_id));
+                            const head = extraFor(g);
+                            const unit = g.in_units ? g.purchase_uom : g.uom; const cause = cp.cause || 'stock';
+                            return (
+                                <tr key={g.key} className="border-t border-slate-100 text-right tabular-nums align-top">
+                                    <td className="px-3 py-2 text-left">{g.line_no}</td>
+                                    <td className="px-3 py-2 text-left text-xs font-semibold text-slate-600 whitespace-nowrap">{stageName(g)}</td>
+                                    <td className="px-3 py-2 text-left"><span className="font-semibold text-slate-800">{g.label}</span><span className="block text-xs text-slate-500">{g.type_name}</span></td>
+                                    <td className="px-3 py-2 whitespace-nowrap">{g.in_units ? `${g.units_to_kit} ${g.purchase_uom}` : `${qty(g.to_kit, g.uom)} ${g.uom}`}</td>
+                                    <td className="px-3 py-2 whitespace-nowrap font-bold text-rose-700">{qty(waitQty, unit)} {unit}{cp.total > 0 && <span className="block text-[11px] font-normal text-slate-500">{qty(cp.total, unit)} {unit} can go in</span>}</td>
+                                    <td className="px-3 py-2 text-left text-xs font-bold text-rose-700">{waitCause(cause)}</td>
+                                    <td className="px-3 py-2 text-xs whitespace-nowrap">{qty(g.stock_on_hand, g.uom)} {g.uom}</td>
+                                    <td className="px-3 py-2 text-xs whitespace-nowrap">{g.extra ? 'free stock' : `${qty(reservedOf(g), g.uom)} ${g.uom}`}</td>
+                                    <td className="px-3 py-2 text-left text-xs">{g.on_order ? <span className="text-slate-700">{qty(g.on_order.qty, g.on_order.uom)} {g.on_order.uom} · {g.on_order.pos}{g.on_order.due ? ` · due ${new Date(g.on_order.due).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}` : ''}</span> : cause === 'res' ? <span className="text-slate-400">—</span> : <span className="font-bold text-rose-700">not on any open PO</span>}</td>
+                                    <td className="px-3 py-2 text-right whitespace-nowrap">{req ? <span className="text-xs text-violet-800">extra line asked</span> : !isSample && perm.prepare && isOpen && head && (
+                                        <button type="button" className="text-xs font-bold text-violet-700 hover:underline inline-flex items-center gap-1" onClick={() => openExtra(head)}><Replace size={12} /> Extra line…</button>)}</td>
+                                </tr>
+                            );
+                        })}
+                            <tr className="border-t-2 border-slate-200 bg-slate-50 text-xs font-bold text-slate-700">
+                                <td className="px-3 py-2" colSpan={5}>Total · {missing.length} item(s) not in a kit yet</td>
+                                <td className="px-3 py-2 text-rose-700" colSpan={3}>{missingText}</td>
+                                <td className="px-3 py-2" colSpan={2}>{missing.filter(x => x.g.on_order).length} on order · {missing.filter(x => !x.g.on_order && (x.cp.cause || 'stock') !== 'res').length} not on any PO</td>
+                            </tr>
+                        </tbody>
+                    </table>}
+                </div>
+            )}
+
+            {(k.returns || []).length > 0 && (
+                // Rejected by the line (26 Nov 2026, migration 92): what the loaders did not take from a kit — back to the store
+                <div className="bg-white border border-rose-200 rounded-xl mb-4 overflow-hidden">
+                    <button type="button" aria-expanded={isShown('returns')} onClick={() => toggle('returns')} className={`w-full flex flex-wrap items-baseline gap-x-3 gap-y-1 px-4 py-2.5 bg-rose-50/60 text-left ${isShown('returns') ? 'border-b border-rose-100' : ''}`}>
+                        <span className="font-bold text-slate-800">{isShown('returns') ? '▾' : '▸'} Rejected by the line — {k.returns.length} line(s)</span>
+                        <span className="text-xs text-slate-600">{[[k.returns.filter(r => r.status === 'PENDING').length, 'to confirm'], [k.returns.filter(r => r.status === 'RECEIVED').length, 'back on the shelf'], [k.returns.filter(r => r.status === 'WRITTEN_OFF').length, 'written off']].filter(([n]) => n).map(([n, t]) => `${n} ${t}`).join(' · ')} · still owed on the trim order</span>
+                    </button>
+                    {isShown('returns') && <KitReturns rows={k.returns} canConfirm={perm.prepare} onDone={load} showOrder />}
+                </div>
+            )}
 
             {(k.extra_requests || []).length > 0 && (
                 <div className="bg-white border border-violet-200 rounded-xl p-4 mb-4">
                     <p className="font-bold text-slate-800 mb-2">Extra lines (from free stock — the merchandiser approves)</p>
                     {k.extra_requests.map(r => (
                         <div key={r.id} className="flex flex-wrap items-center gap-2 py-1.5 border-t border-slate-100 first:border-0 text-sm">
-                            <b>{r.label}</b><span>{qty(r.qty, r.uom)} {r.uom}</span><span className="text-slate-500">for line {k.lines.find(x => x.id === r.replaces_line_id)?.line_no} — {r.reason}</span>
+                            <b>{r.label}</b><span>{qty(r.qty, r.uom)} {r.uom}</span><span className="text-slate-500">for line {lineOf.get(r.replaces_line_id)?.line_no} — {r.reason}</span>
                             <span className={`text-[11px] font-black px-2 py-0.5 rounded border ${r.status === 'PENDING' ? 'bg-amber-50 text-amber-800 border-amber-300' : r.status === 'APPROVED' ? 'bg-emerald-50 text-emerald-800 border-emerald-300' : 'bg-slate-50 text-slate-500 border-slate-300'}`}>{r.status.toLowerCase()}</span>
                             <span className="text-xs text-slate-500">{r.requested_by_name}{r.decided_by_name ? ` · ${r.decided_by_name}` : ''}{r.decision_note ? ` — ${r.decision_note}` : ''}</span>
                             {r.status === 'PENDING' && <span className="ml-auto flex gap-2">
                                 {perm.approve_extra && <PrimaryButton busy={busy} disabled={busy} onClick={() => run(() => trimKitsApi.approveExtra(r.id))}>Approve</PrimaryButton>}
-                                {perm.approve_extra && <SecondaryButton onClick={() => askReason({ title: 'Refuse the extra line', confirm: 'Refuse', hint: 'The kit stays as it is.', run: (t) => trimKitsApi.refuseExtra(r.id, t) })}>Refuse</SecondaryButton>}
+                                {perm.approve_extra && <SecondaryButton onClick={() => askReason({ title: 'Refuse the extra line', confirm: 'Refuse', hint: 'The trim order stays as it is.', run: (t) => trimKitsApi.refuseExtra(r.id, t) })}>Refuse</SecondaryButton>}
                                 {perm.prepare && <SecondaryButton onClick={() => run(() => trimKitsApi.withdrawExtra(r.id))}>Withdraw</SecondaryButton>}
                             </span>}
                         </div>
@@ -341,10 +550,11 @@ function KitView({ id }) {
                         const bill = (k.bills || []).find(b => b.handover_id === h.id);
                         return (
                             <div key={h.id} className="py-2 border-t border-slate-100 first:border-0 text-sm">
-                                {!h.issue_id ? <b className="text-slate-800">Garment labels</b> : <Link to={`/v3/trim-kits/slips/${h.issue_id}`} className="font-bold text-indigo-700 hover:underline">{h.issue_no}</Link>}
-                                <span className="text-slate-600"> · {h.production_line_name} · {h.signed_by_name || '—'} · {new Date(h.signed_at).toLocaleString('en-IN')}{h.partial ? ' · part of the kit' : ''}</span>
+                                {h.kit_id && <b className="mr-1 text-slate-900">{kitNoOf(h.kit_id)}</b>}
+                                {!h.issue_id ? <b className="text-slate-800">Garment labels</b> : <Link to={`/v3/trim-orders/slips/${h.issue_id}`} className="font-bold text-indigo-700 hover:underline">{h.issue_no}</Link>}
+                                <span className="text-slate-600"> · {h.store_override ? `to ${h.received_by_name} (sampling) · recorded by ${h.signed_by_name || 'the store'}` : `${h.production_line_name} · ${h.signed_by_name || '—'}`} · {new Date(h.signed_at).toLocaleString('en-IN')}</span>
                                 {h.note && <span className="block text-xs text-slate-500">{h.note}</span>}
-                                <ul className="ml-5 list-disc text-xs text-slate-600">{h.lines.map(x => <li key={x.kit_line_id}>{x.label}: {x.units ? `${x.units} ${k.lines.find(l => l.id === x.kit_line_id)?.purchase_uom} = ` : ''}{qty(x.qty, x.uom)} {x.uom}</li>)}
+                                <ul className="ml-5 list-disc text-xs text-slate-600">{h.lines.map(x => <li key={x.order_line_id}>{x.label}: {x.units ? `${x.units} ${lineOf.get(x.order_line_id)?.purchase_uom} = ` : ''}{qty(x.qty, x.uom)} {x.uom}</li>)}
                                     {h.labels_qty > 0 && <li>Garment labels: {h.labels_qty} pcs{h.labels_counted != null && h.labels_counted !== h.labels_qty ? ` (counted ${h.labels_counted})` : ''}{h.labels_note ? ` — ${h.labels_note}` : ''}</li>}</ul>
                                 {/* Without prices (the stores and the floor, 29 Oct 2026) the bill shows its number only — its values are for accounts. */}
                                 {bill && (bill.total === undefined
@@ -353,14 +563,14 @@ function KitView({ id }) {
                             </div>
                         );
                     })}
-                    <p className="text-xs text-slate-500 mt-2">Trims not used come back on a trim return slip — the line loader drafts it, the trim store receives it.</p>
+                    <p className="text-xs text-slate-500 mt-2">{isSample ? 'Trims sampling did not use: the trim store records them on the sample request (back to free stock).' : 'Trims not used come back on a trim return slip — the line loader drafts it, the trim store receives it.'}</p>
                 </div>
                 <div className="bg-white border border-slate-200 rounded-xl p-4">
                     <p className="font-bold text-slate-800 mb-2">History</p>
                     <div className="divide-y divide-slate-100 text-sm max-h-[480px] overflow-y-auto">
                         {k.history.map(h => (
                             <div key={h.id} className="py-1.5">
-                                <span className="text-xs text-slate-400 mr-2">{new Date(h.created_at).toLocaleString('en-IN')}</span><b>{ACTION[h.action] || h.action}</b>{h.user_name ? <span className="text-slate-600"> · {h.user_name}</span> : null}{h.reason ? <span className="text-slate-500"> — {h.reason}</span> : null}
+                                <span className="text-xs text-slate-400 mr-2">{new Date(h.created_at).toLocaleString('en-IN')}</span>{h.kit_no && <span className="mr-1 text-[11px] font-black px-1.5 py-0.5 rounded border border-slate-300 bg-slate-50 text-slate-700">{h.kit_no}</span>}<b>{ACTION[h.action] || h.action}</b>{h.user_name ? <span className="text-slate-600"> · {h.user_name}</span> : null}{h.reason ? <span className="text-slate-500"> — {h.reason}</span> : null}
                                 {h.detail?.summary?.length > 0 && <ul className="ml-6 list-disc text-xs text-slate-600">{h.detail.summary.map((x, i) => <li key={i}>{x}</li>)}</ul>}
                             </div>
                         ))}
@@ -368,115 +578,168 @@ function KitView({ id }) {
                 </div>
             </div>
 
-            {pick && (
-                <Modal title={`Put in the kit — ${k.kit_no}`} onClose={() => setPick(null)}>
-                    <div className="space-y-3 w-[min(900px,94vw)] max-h-[80vh] overflow-y-auto">
-                        <p className="text-sm text-slate-600">Enter what you <b>physically put in the kit</b>. Less than owed needs a reason — damaged and count short adjust the stock; the line waits in Pending to fulfil. The kit goes ready with what is in it.</p>
-                        <div className="overflow-x-auto border border-slate-200 rounded-lg">
-                            <table className="w-full text-sm">
-                                <thead className="bg-slate-50 text-xs font-bold text-slate-500 uppercase"><tr><th className="px-2 py-1.5 text-center w-8">#</th><th className="px-2 py-1.5 text-left">Trim type</th><th className="px-2 py-1.5 text-left">Item</th><th className="px-2 py-1.5 text-right">Owed (order + over-cut)</th><th className="px-2 py-1.5 text-right">In stock</th><th className="px-2 py-1.5 text-right">Put in</th><th className="px-2 py-1.5 text-left">If less — why</th></tr></thead>
-                                <tbody>{openRows.map(g => {
-                                    const r = pick.rows.get(g.key);
-                                    const sh = pickShort(g, r);
-                                    const set = (patch) => setPick({ rows: new Map(pick.rows).set(g.key, { ...r, ...patch }) });
-                                    const ov = g.lines.filter(isOver).reduce((a, l) => a + l.remaining, 0);
-                                    return (
-                                        <tr key={g.key} className={`border-t border-slate-100 align-top ${sh ? 'bg-amber-50/60' : ''}`}>
-                                            <td className="px-2 py-1.5 text-center text-xs text-slate-500 tabular-nums">{g.line_no}</td>
-                                            <td className="px-2 py-1.5 text-xs font-semibold text-slate-600 whitespace-nowrap">{g.type_name || '—'}</td>
-                                            <td className="px-2 py-1.5"><span className="font-semibold text-slate-800">{g.label}</span>{g.extra && <span className="block text-[11px] text-violet-700">extra line · free stock</span>}{ov > 0 && <span className="block text-[11px] text-sky-700">incl. over-cut {qty(ov, g.uom)} {g.uom} (free stock)</span>}</td>
-                                            <td className="px-2 py-1.5 text-right tabular-nums whitespace-nowrap">{g.in_units ? `${g.units_owed} ${g.purchase_uom}` : `${qty(g.remaining, g.uom)} ${g.uom}`}</td>
-                                            <td className="px-2 py-1.5 text-right tabular-nums whitespace-nowrap text-slate-600">{qty(g.stock_on_hand, g.uom)} {g.uom}{g.stock_on_hand <= 0 && <span className="block text-[11px] font-bold text-rose-700">not in store</span>}</td>
-                                            <td className="px-2 py-1.5 text-right"><input className="w-24 px-2 py-1 text-right border border-slate-300 rounded" type="number" min="0" step={g.in_units || g.uom === 'pcs' ? 1 : 'any'} value={r.v} onChange={e => set({ v: e.target.value })} aria-label={`Put in ${g.label}`} /><span className="ml-1 text-xs text-slate-500">{g.in_units ? g.purchase_uom : g.uom}</span></td>
-                                            <td className="px-2 py-1.5">{sh && (
-                                                <div className="space-y-1 min-w-[220px]">
-                                                    <select className={inputCls} value={r.reason} onChange={e => set({ reason: e.target.value })} aria-label={`Why short ${g.label}`}><option value="">— why —</option>{Object.entries(SHORT_REASON).map(([kk, lab]) => <option key={kk} value={kk}>{lab}</option>)}</select>
-                                                    <input className={inputCls} placeholder={r.reason === 'OTHER' ? 'What happened *' : 'Note'} value={r.note} onChange={e => set({ note: e.target.value })} />
-                                                </div>)}</td>
-                                        </tr>
-                                    );
-                                })}
-                                {LB && LB.remaining > 0 && (
-                                    <tr className="border-t border-slate-100 align-top bg-indigo-50/40">
-                                        <td className="px-2 py-1.5" colSpan={3}><span className="font-semibold text-slate-800">Garment barcode labels</span><span className="block text-[11px] text-indigo-700">what is printed goes in — print the rest on the kit</span></td>
-                                        <td className="px-2 py-1.5 text-right tabular-nums whitespace-nowrap">{LB.remaining} pcs</td>
-                                        <td className="px-2 py-1.5 text-right tabular-nums whitespace-nowrap text-slate-600">{LB.printed} printed</td>
-                                        <td className="px-2 py-1.5 text-right font-bold tabular-nums">{LB.available} <span className="text-xs font-normal text-slate-500">pcs</span></td>
-                                        <td className="px-2 py-1.5 text-xs">{LB.available < LB.remaining ? <span className="text-amber-800">{LB.remaining - LB.available} not printed yet — they follow</span> : ''}</td>
-                                    </tr>
-                                )}
-                                <tr className="border-t-2 border-slate-200 bg-slate-50 text-xs font-bold"><td className="px-2 py-1.5" colSpan={5}>{openRows.length + (LB && LB.remaining > 0 ? 1 : 0)} item(s)</td>
-                                    <td className="px-2 py-1.5 text-right">{openRows.filter(g => Number(pick.rows.get(g.key).v || 0) > 0).length} going in</td>
-                                    <td className="px-2 py-1.5 text-amber-800">{openRows.filter(g => pickShort(g, pick.rows.get(g.key))).length} short → pending to fulfil</td></tr>
-                                </tbody>
-                            </table>
-                        </div>
+            {/* 26 Nov 2026 (owner: "no need of What this kit is for table or at least collapse it at the bottom") */}
+            {!isSample && <div className="mt-4 mb-2">
+                <button type="button" onClick={() => setShowCut(v => !v)} className="text-sm font-bold text-slate-600 hover:text-indigo-700">{showCut ? '▾' : '▸'} What this trim order is for — garments cut per colour × size</button>
+                {showCut && <div className="mt-2"><CutSummary k={k} rows={rows} /></div>}
+            </div>}
+
+            {handOver && (
+                <Modal title={`Hand ${handOver.kit.kit_no} to sampling`} onClose={() => setHandOver(null)}>
+                    <div className="space-y-3 w-[min(480px,90vw)]">
+                        <p className="text-sm text-slate-600">Everything in the kit goes out as it is — one trim slip (marked sample) and a valuation bill. Sampling does not sign in 3.0 yet: you record the handover, with the name of who took it.</p>
+                        <Field label="Taken by (sampling) *"><input className={inputCls} value={handOver.name} onChange={e => setHandOver({ ...handOver, name: e.target.value })} autoFocus placeholder="Name of the person in sampling" /></Field>
+                        <Field label="Note"><input className={inputCls} value={handOver.note} onChange={e => setHandOver({ ...handOver, note: e.target.value })} /></Field>
                         <ErrorBox text={formError} />
-                        <div className="flex justify-end gap-2"><SecondaryButton onClick={() => setPick(null)}>Back</SecondaryButton>
-                            <PrimaryButton busy={busy} disabled={busy || !pickReady} onClick={() => run(() => trimKitsApi.ready(id, pickPayload()), () => setPick(null))}>
-                                <PackageCheck size={14} /> {pickAny ? 'Mark ready with what is in the kit' : 'Save — nothing could go in'}</PrimaryButton></div>
+                        <div className="flex justify-end gap-2"><SecondaryButton onClick={() => setHandOver(null)}>Back</SecondaryButton>
+                            <PrimaryButton busy={busy} disabled={busy || !handOver.name.trim()} onClick={() => run(() => trimKitsApi.handOver(handOver.kit.id, { received_by_name: handOver.name.trim(), note: handOver.note.trim() || undefined }), () => setHandOver(null))}><HandHelping size={14} /> Hand over</PrimaryButton></div>
+                    </div>
+                </Modal>
+            )}
+            {change && (
+                <Modal title={`Change the sample's trims — ${k.trim_order_no}`} onClose={() => setChange(null)}>
+                    <div className="space-y-3 w-[min(860px,94vw)] max-h-[80vh] overflow-y-auto">
+                        <p className="text-sm text-slate-600">Change a quantity (0 takes the item off — never below what is handed or in a kit), or add a stand-in item. One reason for this change.</p>
+                        <table className="w-full text-sm">
+                            <thead className="text-xs font-bold text-slate-500 text-left"><tr><th className="py-1">#</th><th className="py-1">Item</th><th className="py-1 text-right">On the order</th><th className="py-1 text-right">Handed / in kits</th><th className="py-1 text-right">New quantity</th></tr></thead>
+                            <tbody>{k.lines.filter(l => l.remaining > 0 || l.issued > 0).map(l => {
+                                const v = change.rows.has(l.id) ? change.rows.get(l.id) : String(l.closed >= l.qty - l.issued - 1e-9 && l.closed > 0 ? l.issued : l.qty);
+                                return (
+                                    <tr key={l.id} className="border-t border-slate-100"><td className="py-1">{l.line_no}</td><td className="py-1">{l.label}{l.closed > 0 && <span className="block text-[11px] text-slate-500">taken off {qty(l.closed, l.uom)} {l.uom}</span>}</td>
+                                        <td className="py-1 text-right tabular-nums">{qty(l.qty, l.uom)} {l.uom}</td><td className="py-1 text-right tabular-nums">{qty(l.issued + l.in_kits, l.uom)} {l.uom}</td>
+                                        <td className="py-1 text-right"><input className="w-24 px-2 py-1 text-right border border-slate-300 rounded" type="number" min="0" step={l.uom === 'pcs' ? 1 : 'any'} value={v} onChange={e => setChange({ ...change, rows: new Map(change.rows).set(l.id, e.target.value) })} aria-label={`New quantity ${l.label}`} /> <span className="text-xs text-slate-500">{l.uom}</span></td></tr>
+                                );
+                            })}
+                                {change.add.map((a, i) => (
+                                    <tr key={`a${a.item.id}`} className="border-t border-slate-100 bg-violet-50/40"><td className="py-1 text-violet-700">new</td><td className="py-1">{a.item.brand} · {a.item.code}</td><td /><td />
+                                        <td className="py-1 text-right"><input className="w-24 px-2 py-1 text-right border border-slate-300 rounded" type="number" min="0" value={a.qty} onChange={e => setChange({ ...change, add: change.add.map((x, j) => (j === i ? { ...x, qty: e.target.value } : x)) })} /> <span className="text-xs text-slate-500">{a.item.usage_uom}</span></td></tr>
+                                ))}</tbody>
+                        </table>
+                        <div className="flex gap-2"><input className={inputCls} placeholder="Add an item — search trim items…" value={change.search} onChange={e => setChange({ ...change, search: e.target.value })} onKeyDown={e => { if (e.key === 'Enter') searchChangeItems(change.search); }} /><SecondaryButton onClick={() => searchChangeItems(change.search)}>Search</SecondaryButton></div>
+                        {change.items && <div className="max-h-40 overflow-y-auto border border-slate-200 rounded-lg divide-y divide-slate-100">{change.items.filter(i => !k.lines.some(l => l.item_id === String(i.id) && l.remaining > 0) && !change.add.some(a => a.item.id === i.id)).slice(0, 40).map(i => (
+                            <button key={i.id} type="button" className="w-full text-left px-3 py-1.5 text-sm hover:bg-violet-50" onClick={() => setChange({ ...change, add: [...change.add, { item: i, qty: '' }] })}><b>{i.brand} · {i.code}</b>{i.description ? <span className="text-slate-500"> — {i.description}</span> : null}<span className="float-right text-xs text-slate-500">{qty(i.on_hand, i.usage_uom)} {i.usage_uom} in stock</span></button>))}</div>}
+                        <Field label="Reason *"><input className={inputCls} value={change.reason} onChange={e => setChange({ ...change, reason: e.target.value })} placeholder="e.g. temporary label until the buyer's arrive" /></Field>
+                        <ErrorBox text={formError} />
+                        <div className="flex justify-end gap-2"><SecondaryButton onClick={() => setChange(null)}>Back</SecondaryButton>
+                            <PrimaryButton busy={busy} disabled={busy || !change.reason.trim() || !changePayload().length} onClick={() => run(() => trimKitsApi.sampleLines(id, changePayload()), () => setChange(null))}>Save {changePayload().length} change(s)</PrimaryButton></div>
                     </div>
                 </Modal>
             )}
 
-            {count && (
-                <Modal title={`Count and sign — ${k.kit_no}`} onClose={() => setCount(null)}>
-                    <div className="space-y-3 w-[min(900px,94vw)] max-h-[80vh] overflow-y-auto">
-                        <Field label="Line it goes to *">
-                            <select className={inputCls} value={count.line_id} onChange={e => setCount({ ...count, line_id: e.target.value })}>
-                                <option value="">— pick —</option>
-                                {count.lines.map(l => <option key={l.id} value={l.id}>{l.name}{l.stage ? ` (${l.stage})` : ''}</option>)}
-                            </select>
-                        </Field>
-                        <p className="text-xs text-slate-500">Count each item (order and over-cut together). Less than picked = short, more = excess (only what was picked is signed — give the extra back). Wrong item or damaged: mark it — that line (or the damaged part) goes back to the store; the good lines are signed.</p>
-                        <div className="overflow-x-auto border border-slate-200 rounded-lg">
-                            <table className="w-full text-sm">
-                                <thead className="bg-slate-50 text-xs font-bold text-slate-500 uppercase"><tr><th className="px-2 py-1.5 text-left">Item</th><th className="px-2 py-1.5 text-right">Picked</th><th className="px-2 py-1.5 text-right">Counted</th><th className="px-2 py-1.5 text-left">Problem</th><th className="px-2 py-1.5 text-left">Result</th></tr></thead>
-                                <tbody>{countRows.map(g => {
-                                    const r = count.rows.get(g.key);
-                                    const set = (patch) => setCount({ ...count, rows: new Map(count.rows).set(g.key, { ...r, ...patch }) });
-                                    const o = outcome(g, r);
-                                    const l = g;   // amounts for the whole item
+            {E && (
+                <Modal fullScreen title={E.kit ? `Change ${E.kit.kit_no}` : `New kit — ${k.trim_order_no}`} onClose={() => setEdit(null)}>
+                    {/* full screen (26 Nov 2026): every column on the store's PC — no clipping, one scroll */}
+                    <div className="space-y-3 max-w-[1400px] mx-auto">
+                        <p className="text-sm text-slate-600">Tick what goes in <b>this bag</b> and enter what you physically put in. Only what can go in now is listed, each at what can go in (net of the other kits). Untick an item — or a whole stage — to leave it for another kit: it stays owed on the trim order, no reason needed. Less than can go in needs a reason (damaged and count short adjust the stock). {E.kit ? '' : 'The kit number is given when you save — write it on the bag.'}</p>
+                        <div className="grid md:grid-cols-3 gap-3">
+                            <Field label="Goes to (line)">
+                                <select className={inputCls} value={E.line_id} onChange={e => setEdit({ ...E, line_id: e.target.value })}>
+                                    <option value="">— any line —</option>
+                                    {(() => { const mine = new Set((k.batch_lines || []).map(l => l.id)); return [...E.lines.filter(l => mine.has(l.id)), ...E.lines.filter(l => !mine.has(l.id))]; })()
+                                        .map(l => <option key={`${l.id}-${l.stage || ''}`} value={l.id}>{l.name}{l.stage ? ` (${l.stage})` : ''}{(k.batch_lines || []).some(b => b.id === l.id) ? ' — batch is here' : ''}</option>)}
+                                </select>
+                            </Field>
+                            <Field label={`Garment barcode labels${eLabAvail ? ` (${eLabAvail} printed, in no kit)` : ''}`}>
+                                {eLabAvail > 0 || E.labelsOn ? (
+                                    <div className="flex items-center gap-2">
+                                        <label className="inline-flex items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={E.labelsOn} onChange={e => setEdit({ ...E, labelsOn: e.target.checked })} /> In this kit</label>
+                                        {E.labelsOn && <input className={`w-24 px-2 py-1.5 text-right border rounded ${eLabBad ? 'border-rose-400' : 'border-slate-300'}`} type="number" min="1" max={eLabAvail} step="1" value={E.labels} onChange={e => setEdit({ ...E, labels: Number(e.target.value) > eLabAvail ? String(eLabAvail) : e.target.value })} aria-label="Garment labels in this kit" />}
+                                        {E.labelsOn && <span className="text-xs text-slate-500">pcs</span>}
+                                    </div>
+                                ) : <p className="text-sm text-slate-400 py-1.5">{LB ? (LB.remaining - LB.picked > 0 ? 'none printed yet — print them on the trim order' : 'all in kits or handed') : 'no labels on this trim order'}</p>}
+                            </Field>
+                            <Field label="Note"><input className={inputCls} value={E.notes} onChange={e => setEdit({ ...E, notes: e.target.value })} placeholder="e.g. sewing trims only" /></Field>
+                        </div>
+                        {E.waiting.length > 0 && (
+                            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                                <b>{E.waiting.length} item{E.waiting.length === 1 ? '' : 's'} can't go in now</b> ({causeText(E.waiting.map(g => ({ cp: pickCaps(g) })))}) — not listed; {E.waiting.length === 1 ? 'it stays' : 'they stay'} owed on the trim order and in Pending to fulfil.
+                                {E.waiting.some(g => pickCaps(g).cause === 'res') && <> Reserve on the <a href={bomLink} target="_blank" rel="noreferrer" className="font-bold text-indigo-700 underline">Order BOM</a> (new tab) to bring them in.</>}
+                            </div>
+                        )}
+                        {E.groups.length > 0 && (
+                            <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-xs font-black uppercase tracking-wider text-slate-500">Stages in this kit</span>
+                                {eStages.map(st => {
+                                    const n = st.rows.filter(isOn).length; const all = n === st.rows.length;
                                     return (
-                                        <tr key={g.key} className={`border-t border-slate-100 align-top ${o.kind !== 'OK' ? 'bg-amber-50/60' : ''}`}>
-                                            <td className="px-2 py-1.5 font-semibold text-slate-800">{g.label}{g.lines.some(isOver) && <span className="block text-[11px] font-normal text-sky-700">order + over-cut</span>}</td>
-                                            <td className="px-2 py-1.5 text-right tabular-nums whitespace-nowrap">{amount(l, pickedOfG(g))}</td>
-                                            <td className="px-2 py-1.5 text-right"><input className="w-24 px-2 py-1 text-right border border-slate-300 rounded" type="number" min="0" step={l.in_units || l.uom === 'pcs' ? 1 : 'any'} value={r.v} onChange={e => set({ v: e.target.value })} aria-label={`Counted ${g.label}`} /></td>
-                                            <td className="px-2 py-1.5">{!count.legacy && (
-                                                <div className="space-y-1 min-w-[200px]">
-                                                    <select className={inputCls} value={r.issue} onChange={e => set({ issue: e.target.value })} aria-label={`Problem ${l.label}`}><option value="">—</option><option value="WRONG_ITEM">Wrong item</option><option value="DAMAGED">Damaged</option></select>
-                                                    {r.issue === 'DAMAGED' && <input className={inputCls} type="number" min="1" step={l.in_units || l.uom === 'pcs' ? 1 : 'any'} placeholder={`How many damaged (${l.in_units ? l.purchase_uom : l.uom}) *`} value={r.damaged} onChange={e => set({ damaged: e.target.value })} />}
-                                                    {r.issue && <input className={inputCls} placeholder={r.issue === 'WRONG_ITEM' ? 'What was in the kit instead *' : 'Note'} value={r.note} onChange={e => set({ note: e.target.value })} />}
-                                                </div>)}</td>
-                                            <td className="px-2 py-1.5 text-xs">{count.legacy ? `sign ${amount(l, Number(r.v || 0))}` : <><b className={o.kind === 'OK' ? 'text-emerald-700' : 'text-amber-800'}>{COUNT_ISSUE[o.kind]}</b> — sign {amount(l, o.signed)}{o.kind === 'WRONG_ITEM' ? ' (line back to the store)' : o.kind === 'DAMAGED' ? ' (damaged back)' : o.kind === 'SHORT' ? ' (rest back to the store)' : o.kind === 'EXCESS' ? ' (give the extra back)' : ''}</>}</td>
-                                        </tr>
+                                        <button key={st.key} type="button" onClick={() => setStage(st.key, !all)}
+                                            className={`inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm font-bold ${n ? 'border-indigo-300 bg-indigo-50 text-indigo-800' : 'border-slate-200 bg-white text-slate-400 line-through'}`}>
+                                            <input type="checkbox" readOnly checked={all} ref={el => { if (el) el.indeterminate = n > 0 && !all; }} className="pointer-events-none" />
+                                            {st.name} <span className="font-normal tabular-nums">{n}/{st.rows.length}</span>
+                                        </button>
                                     );
                                 })}
-                                {count.labels && (
-                                    <tr className="border-t border-slate-100 align-top bg-indigo-50/40">
-                                        <td className="px-2 py-1.5 font-semibold text-slate-800">Garment barcode labels</td>
-                                        <td className="px-2 py-1.5 text-right tabular-nums whitespace-nowrap">{LB.picked} pcs</td>
-                                        <td className="px-2 py-1.5 text-right"><input className="w-24 px-2 py-1 text-right border border-slate-300 rounded" type="number" min="0" step="1" value={count.labels.v} onChange={e => setCount({ ...count, labels: { ...count.labels, v: e.target.value } })} aria-label="Counted garment labels" /></td>
-                                        <td className="px-2 py-1.5"><input className={inputCls} placeholder="Note (e.g. torn)" value={count.labels.note} onChange={e => setCount({ ...count, labels: { ...count.labels, note: e.target.value } })} /></td>
-                                        <td className="px-2 py-1.5 text-xs">{Number(count.labels.v || 0) < LB.picked ? <><b className="text-amber-800">Short</b> — sign {Number(count.labels.v || 0)} (rest back to the store)</> : <><b className="text-emerald-700">As picked</b> — sign {LB.picked}</>}</td>
-                                    </tr>
-                                )}
-                                <tr className="border-t-2 border-slate-200 bg-slate-50 text-xs font-bold"><td className="px-2 py-1.5" colSpan={4}>{countRows.length + (count.labels ? 1 : 0)} item(s)</td>
-                                    <td className="px-2 py-1.5">{count.legacy ? '' : `${countRows.filter(g => outcome(g, count.rows.get(g.key)).signed > 0).length} signed · ${countRows.filter(g => outcome(g, count.rows.get(g.key)).kind !== 'OK').length} with a problem`}</td></tr>
-                                </tbody>
-                            </table>
-                        </div>
-                        <Field label="Note"><input className={inputCls} value={count.note} onChange={e => setCount({ ...count, note: e.target.value })} /></Field>
+                                <button type="button" onClick={() => eStages.forEach(st => setStage(st.key, true))} className="text-xs font-bold text-indigo-700 hover:underline">all</button>
+                                <button type="button" onClick={() => eStages.forEach(st => setStage(st.key, false))} className="text-xs font-bold text-indigo-700 hover:underline">none</button>
+                            </div>
+                        )}
+                        {E.groups.length > 0 ? (
+                            <div className="overflow-x-auto border border-slate-200 rounded-lg">
+                                <table className="w-full text-sm">
+                                    <thead className="bg-slate-50 text-xs font-bold text-slate-500 uppercase"><tr><th className="px-2 py-1.5 w-8" title="In this kit" /><th className="px-2 py-1.5 text-center w-8">#</th><th className="px-2 py-1.5 text-left">Trim type</th><th className="px-2 py-1.5 text-left">Item</th><th className="px-2 py-1.5 text-right">Not in a kit</th><th className="px-2 py-1.5 text-right">In stock</th><th className="px-2 py-1.5 text-right">Reserved</th><th className="px-2 py-1.5 text-right">Can go in now</th><th className="px-2 py-1.5 text-right">Put in</th><th className="px-2 py-1.5 text-left">If less — why</th></tr></thead>
+                                    <tbody>{eStages.map(st => {
+                                        const n = st.rows.filter(isOn).length; const all = n === st.rows.length;
+                                        return [
+                                            <tr key={`st-${st.key}`} className="border-t-2 border-slate-200 bg-slate-100/80">
+                                                <td className="px-2 py-1.5 text-center"><input type="checkbox" checked={all} ref={el => { if (el) el.indeterminate = n > 0 && !all; }} onChange={() => setStage(st.key, !all)} aria-label={`Put ${st.name} in this kit`} /></td>
+                                                <td className="px-2 py-1.5 text-xs font-black uppercase tracking-wider text-slate-700" colSpan={9}>{st.name} <span className="ml-2 font-normal normal-case tracking-normal text-slate-500">{n} of {st.rows.length} item{st.rows.length === 1 ? '' : 's'} in this kit{n < st.rows.length ? ` · ${st.rows.length - n} for another kit` : ''}</span></td>
+                                            </tr>,
+                                            ...st.rows.map(g => {
+                                                const r = eRow(g);
+                                                const cp = pickCaps(g);
+                                                const sh = eShort(g, r); const over = eOver(g, r); const zero = r.on && !(Number(r.v || 0) > 0);
+                                                const ov = g.lines.filter(isOver).reduce((a, l) => a + l.to_kit, 0);
+                                                const unit = g.in_units ? g.purchase_uom : g.uom;
+                                                return (
+                                                    <tr key={g.key} className={`border-t border-slate-100 align-top ${!r.on ? 'bg-slate-50 text-slate-400' : over || zero ? 'bg-rose-50/70' : sh ? 'bg-amber-50/60' : ''}`}>
+                                                        <td className="px-2 py-1.5 text-center"><input type="checkbox" checked={r.on} onChange={() => setRow(g, { on: !r.on })} aria-label={`${g.label} in this kit`} /></td>
+                                                        <td className="px-2 py-1.5 text-center text-xs tabular-nums">{g.line_no}</td>
+                                                        <td className="px-2 py-1.5 text-xs font-semibold whitespace-nowrap">{g.type_name || '—'}</td>
+                                                        <td className="px-2 py-1.5"><span className={`font-semibold ${r.on ? 'text-slate-800' : ''}`}>{g.label}</span>{g.extra && <span className="block text-[11px] text-violet-700">extra line · free stock</span>}{ov > 0 && <span className="block text-[11px] text-sky-700">incl. over-cut {qty(ov, g.uom)} {g.uom} (free stock)</span>}</td>
+                                                        <td className="px-2 py-1.5 text-right tabular-nums whitespace-nowrap">{g.in_units ? `${g.units_to_kit} ${g.purchase_uom}` : `${qty(g.to_kit, g.uom)} ${g.uom}`}</td>
+                                                        <td className="px-2 py-1.5 text-right tabular-nums whitespace-nowrap">{qty(g.stock_on_hand, g.uom)} {g.uom}</td>
+                                                        <td className="px-2 py-1.5 text-right tabular-nums whitespace-nowrap">{g.extra ? <span className="text-xs">free stock</span> : <>{qty(reservedOf(g), g.uom)} {g.uom}</>}</td>
+                                                        <td className={`px-2 py-1.5 text-right tabular-nums whitespace-nowrap font-bold ${r.on ? 'text-emerald-700' : ''}`}>{qty(cp.total, unit)} {unit}
+                                                            {cp.cause && <span className="block text-[11px] font-normal text-slate-500">rest waits — {waitCause(cp.cause)}</span>}</td>
+                                                        <td className="px-2 py-1.5 text-right whitespace-nowrap">{r.on ? (<>
+                                                            <input className={`w-24 px-2 py-1 text-right border rounded ${over || zero ? 'border-rose-400' : r.capped ? 'border-amber-400' : 'border-slate-300'}`} type="number" min="0" max={cp.total} step={g.in_units || g.uom === 'pcs' ? 1 : 'any'} value={r.v}
+                                                                // more than can go in → back to the most that can (26 Nov 2026)
+                                                                onChange={e => { const v = e.target.value; setRow(g, Number(v) > cp.total + 1e-9 ? { v: String(cp.total), capped: true } : { v, capped: false }); }} aria-label={`Put in ${g.label}`} /><span className="ml-1 text-xs text-slate-500">{unit}</span>
+                                                            {over && <span className="block text-[11px] font-bold text-rose-700 mt-0.5">more than can go in now</span>}
+                                                            {r.capped && !over && <span className="block text-[11px] font-bold text-amber-700 mt-0.5">set to the most that can go in</span>}
+                                                            {zero && <span className="block text-[11px] font-bold text-rose-700 mt-0.5">untick to leave it out</span>}
+                                                        </>) : <span className="text-xs font-bold">another kit</span>}</td>
+                                                        <td className="px-2 py-1.5">{sh && (
+                                                            <div className="space-y-1 min-w-[200px]">
+                                                                <select className={inputCls} value={r.reason} onChange={e => setRow(g, { reason: e.target.value })} aria-label={`Why less ${g.label}`}><option value="">— why less —</option>{Object.entries(SHORT_REASON).map(([kk, lab]) => <option key={kk} value={kk}>{lab}</option>)}</select>
+                                                                <input className={inputCls} placeholder={r.reason === 'OTHER' ? 'What happened *' : 'Note'} value={r.note} onChange={e => setRow(g, { note: e.target.value })} />
+                                                            </div>)}</td>
+                                                    </tr>
+                                                );
+                                            }),
+                                        ];
+                                    })}
+                                    <tr className="border-t-2 border-slate-200 bg-slate-50 text-xs font-bold"><td className="px-2 py-1.5" colSpan={8}>Total · {E.groups.length} item(s) can go in now · {eSkipped} for another kit{E.waiting.length ? ` · ${E.waiting.length} waiting (not listed)` : ''}</td>
+                                        <td className="px-2 py-1.5 text-right text-emerald-700">{eGoing + (eLabels > 0 ? 1 : 0)} in this kit</td>
+                                        <td className="px-2 py-1.5 text-amber-800">{E.groups.filter(g => eShort(g, eRow(g))).length ? `${E.groups.filter(g => eShort(g, eRow(g))).length} less than could go in` : ''}</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        ) : (
+                            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">No item can go in a kit now{eLabAvail ? ' — only the garment labels' : ''}.</p>
+                        )}
+                        {(eBlocked.length > 0 || eZero.length > 0 || eLabBad) && (
+                            <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900">
+                                {eBlocked.length > 0 && <p><b>{eBlocked.length} item{eBlocked.length === 1 ? '' : 's'} more than can go in now</b> — the stock or {k.order_no}'s reservation moved since this kit was made. Put in at most what can go in.</p>}
+                                {eZero.length > 0 && <p><b>{eZero.length} ticked item{eZero.length === 1 ? '' : 's'} at 0</b> — untick {eZero.length === 1 ? 'it' : 'them'} to leave for another kit, or enter what went in.</p>}
+                                {eLabBad && <p><b>Garment labels:</b> 1 to {eLabAvail} — or untick them.</p>}
+                            </div>
+                        )}
                         <ErrorBox text={formError} />
-                        <div className="flex justify-end gap-2">
-                            <SecondaryButton onClick={() => setCount(null)}>Cancel</SecondaryButton>
-                            <PrimaryButton busy={busy} disabled={busy || !countReady}
-                                onClick={() => run(() => trimKitsApi.sign(id, {
-                                    production_line_id: count.line_id, note: count.note || null,
-                                    lines: countPayload(),
-                                    ...(count.labels ? { labels: { counted: Number(count.labels.v || 0), note: count.labels.note || undefined } } : {}),
-                                }), () => setCount(null))}><PenLine size={14} /> Sign — I received the good lines</PrimaryButton>
-                        </div>
+                        <div className="flex flex-wrap justify-end gap-2"><SecondaryButton onClick={() => setEdit(null)}>Back</SecondaryButton>
+                            <SecondaryButton disabled={busy || !eReady} onClick={() => saveKit(false)}><Save size={14} /> {E.kit ? 'Save changes' : 'Save kit — being prepared'}</SecondaryButton>
+                            <PrimaryButton busy={busy} disabled={busy || !eReady} onClick={() => saveKit(true)}>
+                                <PackageCheck size={14} /> {`Save and mark ready — ${eGoing + (eLabels > 0 ? 1 : 0)} item(s)${eGoingStages.length ? ` · ${eGoingStages.join(', ')}` : ''}`}</PrimaryButton></div>
                     </div>
                 </Modal>
             )}
@@ -484,7 +747,7 @@ function KitView({ id }) {
             {extra && (
                 <Modal title={`Extra line for ${extra.line.label}`} onClose={() => setExtra(null)}>
                     <div className="space-y-3 w-[min(620px,92vw)] max-h-[80vh] overflow-y-auto">
-                        <p className="text-sm text-slate-600">{handout(extra.line, extra.line.remaining)} still owed. Propose another item from <b>free stock</b>; the merchandiser approves — then this line is closed as replaced and the extra line is picked like any other.</p>
+                        <p className="text-sm text-slate-600">{handout(extra.line, extra.line.remaining)} still owed. Propose another item from <b>free stock</b>; the merchandiser approves — then this line is closed as replaced and the extra line goes in a kit like any other.</p>
                         <div className="flex gap-2"><input className={inputCls} placeholder="Search trim items…" value={extra.search} onChange={e => setExtra({ ...extra, search: e.target.value })} onKeyDown={e => { if (e.key === 'Enter') searchItems(extra.search); }} /><SecondaryButton onClick={() => searchItems(extra.search)}>Search</SecondaryButton></div>
                         {!extra.items ? <Loading /> : (
                             <div className="max-h-56 overflow-y-auto border border-slate-200 rounded-lg divide-y divide-slate-100">{extra.items.slice(0, 60).map(i => (
@@ -506,7 +769,7 @@ function KitView({ id }) {
             )}
 
             {labelsOpen && (
-                <Modal title={`Garment labels — ${k.kit_no}`} onClose={() => { setLabelsOpen(false); load(); }}>
+                <Modal title={`Garment labels — ${k.trim_order_no}`} onClose={() => { setLabelsOpen(false); load(); }}>
                     <KitLabelsPanel kitId={id} onClose={() => { setLabelsOpen(false); load(); }} onChanged={load} />
                 </Modal>
             )}
@@ -518,7 +781,7 @@ function KitView({ id }) {
                             <tbody>{basis.lines.flatMap(l => (l.basis?.cells || []).map((c, i) => (
                                 <tr key={`${l.id}-${i}`} className="border-t border-slate-100 text-right tabular-nums"><td className="text-left py-1 text-xs">{PART_LABEL[l.part] || l.part}</td><td className="text-left py-1">{c.colour}</td><td className="text-left py-1">{c.size}</td><td>{c.garments}</td><td>{c.rate}</td><td className="font-semibold">{qty(c.qty, basis.uom)}</td></tr>)))}
                                 <tr className="border-t-2 border-slate-200 text-right font-bold"><td className="text-left py-1" colSpan={5}>Needed (Order BOM rate — wastage on the order's garments, none on over-cut)</td><td>{qty(basis.lines.reduce((a, l) => a + Number(l.basis?.need || 0), 0), basis.uom)}</td></tr></tbody></table>
-                        <p className="text-xs text-slate-500">In the kit: {basis.lines.map(l => `${PART_LABEL[l.part] || l.part} ${handout(l)}`).join(' + ')}{basis.lines.length > 1 ? ` = ${handout(basis, basis.qty)}` : ''}{(basis.in_units || basis.uom === 'pcs') ? ` — rounded up once for the batch to whole ${basis.in_units ? `${basis.purchase_uom}s` : 'pieces'}${basis.lines.length > 1 ? '; the order’s share is its own need rounded up, over-cut gets the rest' : ''}` : ''}.</p>
+                        <p className="text-xs text-slate-500">On the trim order: {basis.lines.map(l => `${PART_LABEL[l.part] || l.part} ${handout(l)}`).join(' + ')}{basis.lines.length > 1 ? ` = ${handout(basis, basis.qty)}` : ''}{(basis.in_units || basis.uom === 'pcs') ? ` — rounded up once for the batch to whole ${basis.in_units ? `${basis.purchase_uom}s` : 'pieces'}${basis.lines.length > 1 ? '; the order’s share is its own need rounded up, over-cut gets the rest' : ''}` : ''}.</p>
                         <div className="flex justify-end"><SecondaryButton onClick={() => setBasis(null)}>Close</SecondaryButton></div>
                     </div>
                 </Modal>

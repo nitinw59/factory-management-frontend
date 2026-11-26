@@ -48,6 +48,20 @@ export const groupByColour = (s, rows) => {
     const name = (g) => (g.colours.length === 1 ? g.colours[0] : g.label);
     return [...m.values()].sort((a, b) => (a.colours.length > 1) - (b.colours.length > 1) || name(a).localeCompare(name(b), undefined, { numeric: true }));
 };
+// By fabric type (23 Nov 2026, owner on /v3/material-issue/issues/55: "instead of summary by colors group by fabric type" → shell or
+// pocketing): the fabric's use on the order's BOM (s.item_roles), then each fabric inside it by name, its garment colours as detail.
+const TYPE_LABEL = { SHELL: 'Shell fabric', CONTRAST: 'Contrast fabric', POCKETING: 'Pocketing fabric', LINING: 'Lining fabric', OTHER: 'Other fabric' };
+const TYPE_RANK = ['SHELL', 'CONTRAST', 'POCKETING', 'LINING', 'OTHER'];
+export const groupByType = (s, rows) => {
+    const m = new Map();
+    for (const g of groupByColour(s, rows)) {
+        const t = s.item_roles?.[String(g.key)] || 'OTHER';
+        if (!m.has(t)) m.set(t, { key: t, label: TYPE_LABEL[t] || t, fabrics: [], rows: [] });
+        const x = m.get(t); x.fabrics.push(g); x.rows.push(...g.rows);
+    }
+    return [...m.values()].sort((a, b) => TYPE_RANK.indexOf(a.key) - TYPE_RANK.indexOf(b.key))
+        .map(t => ({ ...t, fabrics: t.fabrics.sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true })) }));
+};
 export const coloursText = (g) => (!g.colours.length ? '—' : g.colours.length <= 3 ? g.colours.join(', ') : `${g.colours.length} colours`);
 const STATE = { PENDING: 'Waiting', RECEIVED: 'Received', REJECTED: 'Refused' };
 const fileNo = (s) => s.issue_no.replace(/[^\w-]+/g, '-');
@@ -98,30 +112,48 @@ export function exportIssueSlip(s, lh) {
             columnStyles: { 0: { cellWidth: 8 }, 4: right },
         });
     } else {
-        // Fabric (8 Nov 2026, as the slip page): a summary per garment colour, then the rolls under each colour with a subtotal.
-        const groups = groupByColour(s, rows);
-        const stateText = (list) => { const out = list.filter(r => r.status === 'REJECTED').length; return s.status === 'RECEIVED' || s.status === 'REJECTED' ? `${list.length - out} received${out ? ` · ${out} refused` : ''}` : `${list.length} ${s.status === 'SUBMITTED' ? 'waiting' : 'planned'}`; };
-        doc.setFont(undefined, 'bold'); doc.text('Summary by colour', 8, y + 3); doc.setFont(undefined, 'normal');
+        // Fabric (23 Nov 2026, as the slip page): a summary by fabric type (shell, pocketing …) with each fabric in it, then the
+        // rolls under each type and fabric, with subtotals.
+        const types = groupByType(s, rows);
+        const nFabrics = types.reduce((a, t) => a + t.fabrics.length, 0);
+        const lotsOf = (list) => [...new Set(list.map(r => r.dye_lot || '—'))].join(', ');
+        // No status per roll (owner, 23 Nov 2026: "not needed and confusing"): the slip's status is in the header; a roll shows a
+        // note only when it is an exception — refused (with the reason) or partly returned.
+        const noteOf = (r) => [r.status === 'REJECTED' ? `Refused${r.reason ? `: ${r.reason}` : ''}` : '', r.returned_qty ? `${fmtN(r.returned_qty)} returned` : ''].filter(Boolean).join(' · ');
+        const anyNote = rows.some(r => noteOf(r));
+        const refusedText = (list) => { const out = list.filter(r => r.status === 'REJECTED').length; return out ? `${out} refused` : ''; };
+        const typeFill = { fontStyle: 'bold', fillColor: [226, 232, 240] };
+        doc.setFont(undefined, 'bold'); doc.text('Summary by fabric type', 8, y + 3); doc.setFont(undefined, 'normal');
+        const sum = [];
+        for (const t of types) {
+            sum.push([{ content: `${t.label} · ${t.fabrics.length} fabric${t.fabrics.length === 1 ? '' : 's'}`, colSpan: 3, styles: typeFill }, { content: live(t.rows).length, styles: { ...right, ...typeFill } }, { content: unitsText(live(t.rows)), styles: { ...right, ...typeFill } }, ...(anyNote ? [{ content: refusedText(t.rows), styles: typeFill }] : [])]);
+            for (const g of t.fabrics) sum.push([g.label, coloursText(g), lotsOf(g.rows), live(g.rows).length, unitsText(live(g.rows)), ...(anyNote ? [refusedText(g.rows)] : [])]);
+        }
         autoTable(doc, {
             ...TABLE, startY: y + 5,
-            head: [['Colour', 'Fabric', 'Dye lots', { content: 'Rolls', styles: right }, { content: 'Qty', styles: right }, 'Status']],
-            body: groups.map(g => [coloursText(g), g.label, [...new Set(g.rows.map(r => r.dye_lot || '—'))].join(', '), live(g.rows).length, unitsText(live(g.rows)), stateText(g.rows)]),
-            foot: [[{ content: `Total · ${groups.length} colour group${groups.length === 1 ? '' : 's'}`, colSpan: 2 }, `${new Set(rows.map(r => `${r.item_id}|${r.dye_lot || '—'}`)).size} lot(s)`,
-                { content: live(rows).length, styles: right }, { content: unitsText(live(rows)), styles: right }, stateText(rows)]],
-            columnStyles: { 0: { fontStyle: 'bold' }, 3: right, 4: right },
+            head: [['Fabric', 'Garment colours', 'Dye lots', { content: 'Rolls', styles: right }, { content: 'Qty', styles: right }, ...(anyNote ? ['Refused'] : [])]],
+            body: sum,
+            foot: [[{ content: `Total · ${nFabrics} fabric${nFabrics === 1 ? '' : 's'} in ${types.length} type${types.length === 1 ? '' : 's'}`, colSpan: 2 }, `${new Set(rows.map(r => `${r.item_id}|${r.dye_lot || '—'}`)).size} lot(s)`,
+                { content: live(rows).length, styles: right }, { content: unitsText(live(rows)), styles: right }, ...(anyNote ? [refusedText(rows)] : [])]],
+            columnStyles: { 3: right, 4: right },
         });
         let n = 0;
         const body = [];
-        for (const g of groups) {
-            body.push([{ content: `${coloursText(g)}   ${g.label}`, colSpan: 5, styles: { fontStyle: 'bold', fillColor: [238, 242, 255] } }]);
-            for (const r of g.rows) body.push([++n, r.roll_no || '—', r.dye_lot || '—', { content: `${fmtN(r.qty)} ${r.uom}`, styles: right }, stateOf(r)]);
-            if (groups.length > 1) body.push([{ content: `${coloursText(g)} · ${live(g.rows).length} roll${live(g.rows).length === 1 ? '' : 's'}`, colSpan: 3, styles: { fontStyle: 'bold', textColor: 80 } }, { content: unitsText(live(g.rows)), styles: { ...right, fontStyle: 'bold', textColor: 80 } }, '']);
+        for (const t of types) {
+            const span = anyNote ? 5 : 4;
+            body.push([{ content: t.label.toUpperCase(), colSpan: span, styles: { ...typeFill, textColor: 20 } }]);
+            for (const g of t.fabrics) {
+                body.push([{ content: `${g.label}   ·   ${coloursText(g)}`, colSpan: span, styles: { fontStyle: 'bold', fillColor: [238, 242, 255] } }]);
+                for (const r of g.rows) body.push([++n, r.roll_no || '—', r.dye_lot || '—', { content: `${fmtN(r.qty)} ${r.uom}`, styles: right }, ...(anyNote ? [noteOf(r)] : [])]);
+                if (nFabrics > 1) body.push([{ content: `${g.label} · ${live(g.rows).length} roll${live(g.rows).length === 1 ? '' : 's'}`, colSpan: 3, styles: { fontStyle: 'bold', textColor: 80 } }, { content: unitsText(live(g.rows)), styles: { ...right, fontStyle: 'bold', textColor: 80 } }, ...(anyNote ? [''] : [])]);
+            }
+            if (types.length > 1) body.push([{ content: `${t.label} · ${live(t.rows).length} roll${live(t.rows).length === 1 ? '' : 's'}`, colSpan: 3, styles: typeFill }, { content: unitsText(live(t.rows)), styles: { ...right, ...typeFill } }, ...(anyNote ? [{ content: '', styles: typeFill }] : [])]);
         }
         autoTable(doc, {
             ...TABLE, startY: doc.lastAutoTable.finalY + 5,
-            head: [['#', 'Roll', 'Lot', { content: 'Qty', styles: right }, 'Status']],
+            head: [['#', 'Roll', 'Lot', { content: 'Qty', styles: right }, ...(anyNote ? ['Note'] : [])]],
             body,
-            foot: [[{ content: `Total · ${live(rows).length} roll${live(rows).length === 1 ? '' : 's'}${rows.length > live(rows).length ? ` (${rows.length - live(rows).length} refused, not counted)` : ''}`, colSpan: 3 }, { content: unitsText(live(rows)), styles: right }, '']],
+            foot: [[{ content: `Total · ${live(rows).length} roll${live(rows).length === 1 ? '' : 's'}${rows.length > live(rows).length ? ` (${rows.length - live(rows).length} refused, not counted)` : ''}`, colSpan: 3 }, { content: unitsText(live(rows)), styles: right }, ...(anyNote ? [''] : [])]],
             columnStyles: { 0: { cellWidth: 8 } },
         });
     }
@@ -146,17 +178,23 @@ export async function exportPickList(s, lh) {
     doc.setFontSize(9);
     doc.text(`${s.issue_no} · order ${s.order_no} · ${s.customer_name}${s.notes ? ` · ${s.notes}` : ''}`, 8, y); y += 3;
     const rows = slipRows(s).filter(r => r.status !== 'REJECTED').sort((a, b) => (a.location ? 0 : 1) - (b.location ? 0 : 1) || String(a.location || '').localeCompare(String(b.location || ''), undefined, { numeric: true }) || String(a.roll_no).localeCompare(String(b.roll_no), undefined, { numeric: true }));
-    const codes = await Promise.all(rows.map(r => barcode(r.code)));
+    // 23 Nov 2026 (owner: "pick list button doesnt work"): a row that met a page break was split by autotable, and the split
+    // piece comes with row index −1 — the barcode lookup by index found nothing and the export threw. Rows now never split
+    // (a barcode must not be cut in half) and each row carries its own barcode, found by the row, not its position.
+    const codes = await Promise.all(rows.map(r => (r.code ? barcode(r.code) : null)));
+    const body = rows.map(r => ['', r.location || '—', r.label, r.roll_no, r.dye_lot || '—', `${fmtN(r.qty)} ${r.uom}`, '']);
+    const codeOf = new Map(body.map((raw, i) => [raw, codes[i]]));
     const right = { halign: 'right' };
     autoTable(doc, {
-        ...TABLE, startY: y + 1,
+        ...TABLE, startY: y + 1, rowPageBreak: 'avoid', showHead: 'everyPage',
         head: [['', 'Location', 'Fabric', 'Roll', 'Lot', { content: 'Qty', styles: right }, 'Barcode']],
-        body: rows.map(r => ['', r.location || '—', r.label, r.roll_no, r.dye_lot || '—', `${fmtN(r.qty)} ${r.uom}`, '']),
+        body,
         foot: [[{ content: `Total · ${rows.length} roll${rows.length === 1 ? '' : 's'}`, colSpan: 5 }, { content: unitsText(rows), styles: right }, '']],
         bodyStyles: { minCellHeight: 14, valign: 'middle' }, columnStyles: { 0: { cellWidth: 7 }, 5: right, 6: { cellWidth: 44 } },
         didDrawCell: (c) => {
             if (c.section !== 'body' || c.column.index !== 6) return;
-            const b = codes[c.row.index];
+            const b = codeOf.get(c.row.raw) || codes[c.row.index];
+            if (!b) return;
             const h = 12; doc.addImage(b.data, 'PNG', c.cell.x + 1, c.cell.y + 1, Math.min(h * b.ratio, 42), h);
         },
     });

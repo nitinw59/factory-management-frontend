@@ -9,7 +9,7 @@ import Modal from '../../shared/Modal';
 import { SecondaryButton, SearchInput } from '../components/ui';
 import { fmt, when } from './recShared';
 
-const linkOf = (l) => (!l ? null : l.batch_id ? `/v3/cutting/batches/${l.batch_id}` : l.issue_id ? `/v3/material-issue/issues/${l.issue_id}` : l.kit_id ? `/v3/trim-kits/${l.kit_id}` : null);
+const linkOf = (l) => (!l ? null : l.batch_id ? `/v3/cutting/batches/${l.batch_id}` : l.issue_id ? `/v3/material-issue/issues/${l.issue_id}` : l.trim_order_id ? `/v3/trim-orders/${l.trim_order_id}` : null);
 const isWarn = (x) => x.flags?.some(f => f.level === 'warn');
 const PAGE = 300;
 

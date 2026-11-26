@@ -701,7 +701,7 @@ export default function LineLoadingPage() {
     const setLineFilter = (v) => { saveLineFilter(LINE_FILTER_KEY, v); setRows(null); setLinePanel(v ? { loading: true, batches: [] } : null); setLineFilterState(v); };
     const load = useCallback(() => {
         productionApi.pipeline({ ...(showDone ? { all: true } : {}), ...(lineFilter ? { line_id: lineFilter } : {}) }).then(r => { setRows(r.data); setError(''); }).catch(err => setError(apiError(err, 'Failed to load the batches.')));
-        trimKitsApi.list({ status: 'READY' }).then(res => setKits(res.data)).catch(() => setKits(null));
+        trimKitsApi.kits({ status: 'READY' }).then(res => setKits(res.data)).catch(() => setKits(null));
         productionApi.lineWipAll().then(r => setLineList(r.data.map(l => ({ id: l.id, name: l.name, type: l.stage, current: l.open_batches, limit: l.wip_limit })))).catch(() => {});
         if (lineFilter) {
             productionApi.lineWip(lineFilter).then(r => setLinePanel(toLinePanel(r.data))   // 2.0 + 3.0 batches on the line
@@ -749,7 +749,7 @@ export default function LineLoadingPage() {
                 </span>
             </div>
             {kits?.length > 0 && (
-                <Link to="/v3/trim-kits?status=READY" className="flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 hover:border-emerald-400 px-4 py-3">
+                <Link to="/v3/trim-orders?tab=kits:READY" className="flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 hover:border-emerald-400 px-4 py-3">
                     <Package size={20} className="text-emerald-600 shrink-0" />
                     <span className="font-black text-slate-800">{kits.length} trim kit{kits.length === 1 ? '' : 's'} ready for pickup</span>
                     <span className="text-xs text-slate-600 hidden sm:inline">{kits.slice(0, 3).map(k => `${k.kit_no} (${k.order_no}${k.batch_code ? ` · ${k.batch_code}` : ''})`).join(', ')}{kits.length > 3 ? ' …' : ''} — count and sign</span>

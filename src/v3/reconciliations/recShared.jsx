@@ -8,7 +8,7 @@ export const STATUS = {
 export const fmt = (n, d = 3) => (n == null ? '—' : Number(n).toLocaleString('en-IN', { maximumFractionDigits: d }));
 export const money = (n) => (n == null ? '—' : `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`);
 export const when = (d) => (d ? new Date(d).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—');
-export const scopeOf = (r) => (r.kind === 'FABRIC' ? r.order_no : r.kind === 'STAGE' ? `#${r.floor_no} · ${r.stage}` : `${r.kit_no}${r.floor_no ? ` · #${r.floor_no}` : ''}`);
+export const scopeOf = (r) => (r.kind === 'FABRIC' ? r.order_no : r.kind === 'STAGE' ? `#${r.floor_no} · ${r.stage}` : `${r.trim_order_no}${r.floor_no ? ` · #${r.floor_no}` : ''}`);
 export function StatusChip({ r }) {
     // Outdated (21 Oct 2026): its figures no longer hold — whatever its approvals said.
     if (r.outdated_at) return <span className="text-[11px] font-black px-2 py-0.5 rounded border bg-rose-50 text-rose-700 border-rose-300" title={r.outdated_reason || ''}>Outdated — generate again</span>;
