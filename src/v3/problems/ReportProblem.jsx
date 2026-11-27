@@ -10,6 +10,8 @@ import { problemsApi } from '../api/problemsApi';
 import { apiError } from '../api/mastersApi';
 import { Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox } from '../components/ui';
 import { captureContext, captureScreen, installCapture } from './capture';
+import { helpdeskApi } from '../api/helpdeskApi';
+import HelpdeskAnswer from './HelpdeskAnswer';
 
 export const IMPACTS = [
     ['BLOCKED', "I'm blocked", "I can't continue my work", Ban, 'border-rose-400 bg-rose-50 text-rose-800'],
@@ -66,6 +68,10 @@ function ReportBox({ onClose, screen }) {
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
     const [done, setDone] = useState(null);
+    const [hd, setHd] = useState(null);           // the AI helpdesk: { enabled } (27 Nov 2026, migration 93)
+    const [hdRun, setHdRun] = useState(null);     // its run on this report
+    const [hdError, setHdError] = useState('');
+    useEffect(() => { helpdeskApi.status().then(r => setHd(r.data)).catch(() => setHd({ enabled: false })); }, []);
     const fileRef = useRef(null);
     const { setFiles } = imgs;
     useEffect(() => { if (screen) setFiles([screen]); }, [screen, setFiles]);
@@ -76,16 +82,22 @@ function ReportBox({ onClose, screen }) {
         try {
             const res = await problemsApi.create({ kind: idea ? 'IDEA' : 'PROBLEM', impact: idea ? undefined : impact, title: title.trim(), description: text.trim(), ...ctx }, imgs.files);
             setDone(res.data);
+            // a problem goes to the AI helpdesk at once when it is on; the answer shows here (owner: "answer goes direct to floor")
+            if (!idea && hd?.enabled) {
+                try { setHdRun((await helpdeskApi.ask(res.data.id)).data); } catch (err) { setHdError(apiError(err, 'The automatic helpdesk is not available — the admin will reply.')); }
+            }
         } catch (err) { setError(apiError(err, 'Could not send the report.')); }
         finally { setBusy(false); }
     };
 
     if (done) {
         return (
-            <Modal title="Thank you" onClose={onClose}>
-                <div className="w-[min(420px,85vw)] text-center space-y-3 py-2">
-                    <CheckCircle2 size={36} className="mx-auto text-emerald-500" />
+            <Modal title={hdRun ? `Problem #${done.id}` : 'Thank you'} onClose={onClose}>
+                <div className={`${hdRun ? 'w-[min(620px,92vw)]' : 'w-[min(420px,85vw)]'} text-center space-y-3 py-2`}>
+                    {!hdRun && <CheckCircle2 size={36} className="mx-auto text-emerald-500" />}
                     <p className="font-bold text-slate-800">{done.kind === 'IDEA' ? 'Idea' : 'Problem'} #{done.id} sent to the factory admin.</p>
+                    {hdRun && <HelpdeskAnswer run={hdRun} mine onChange={setHdRun} />}
+                    {hdError && <p className="text-sm text-slate-600">{hdError}</p>}
                     <p className="text-sm text-slate-600">You'll see answers under <b>My work → Answers to your reports</b>.</p>
                     <div className="flex justify-center gap-2"><Link to={`/v3/problems/${done.id}`} onClick={onClose} className="text-sm font-bold text-indigo-700 underline">Open #{done.id}</Link></div>
                 </div>

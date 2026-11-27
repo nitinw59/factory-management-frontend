@@ -7,6 +7,7 @@ import { ThumbsUp, Rocket } from 'lucide-react';
 import { problemsApi } from '../api/problemsApi';
 import { apiError } from '../api/mastersApi';
 import { PageHeader, SearchInput, ErrorBox, Loading, inputCls, SecondaryButton } from '../components/ui';
+import HelpdeskAdminButton from './HelpdeskAdmin';
 import { fmtDate } from '../salesOrders/SalesOrderStatusBadge';
 import ReportProblemButton from './ReportProblem';
 
@@ -48,7 +49,7 @@ export default function ProblemsPage() {
     return (
         <div>
             <PageHeader title="Problems & ideas" subtitle="Report a problem from any page with the button at the top. Answers from the factory admin show here and in My work."
-                actions={<span className="flex gap-2">{perm.triage && <SecondaryButton onClick={live}><Rocket size={14} /> Release is live</SecondaryButton>}<ReportProblemButton /></span>} />
+                actions={<span className="flex gap-2">{perm.triage && <HelpdeskAdminButton />}{perm.triage && <SecondaryButton onClick={live}><Rocket size={14} /> Release is live</SecondaryButton>}<ReportProblemButton /></span>} />
             <div className="flex flex-wrap items-center gap-2 mb-3">
                 <div className="inline-flex rounded-lg border border-slate-300 bg-white p-0.5" role="tablist">
                     {tabs.map(([k, l]) => <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => setParams({ tab: k }, { replace: true })}

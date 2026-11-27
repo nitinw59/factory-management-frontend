@@ -145,46 +145,74 @@ export default function TrimKitDetailPage() {
     return (
         <div className="max-w-5xl mx-auto pb-28">
             <Link to={`/v3/trim-orders?tab=kits:${kit.status === 'READY' ? 'READY' : kit.status}`} className="inline-flex items-center gap-1 text-sm font-semibold text-slate-500 hover:text-indigo-600 mb-3"><ArrowLeft size={15} /> Kits</Link>
-            <div className="bg-white border-2 border-slate-800 rounded-xl px-4 py-3 mb-3">
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                    <h1 className="text-3xl font-black tracking-tight text-slate-900">{kit.kit_no}</h1>
-                    <span className={`text-xs font-black px-2 py-0.5 rounded border ${st.cls}`}>{st.label}</span>
-                    <span className="ml-auto text-sm text-slate-500">{kit.status === 'READY' ? `ready ${when(kit.ready_at)}${kit.ready_by_name ? ` · ${kit.ready_by_name}` : ''}` : kit.status === 'SIGNED' ? `signed ${when(kit.signed_at)}` : `made ${when(kit.created_at)}`}</span>
-                </div>
-                <p className="text-sm text-slate-700 mt-1">
-                    <Link to={`/v3/trim-orders/${k.id}`} className="font-bold text-indigo-700 hover:underline">{k.trim_order_no}</Link> · {k.order_no}{k.floor_no ? <> · batch <b>#{k.floor_no}</b></> : ''} · {k.customer_name}
-                </p>
-                <p className="text-sm text-slate-700">{kit.stages?.length ? kit.stages.join(', ') : 'no stage'} → <b>{kit.goes_to || 'any line'}</b> · {groups.length} item{groups.length === 1 ? '' : 's'}{kit.labels_qty ? ` + ${kit.labels_qty} garment labels` : ''}</p>
-                {kit.notes && <p className="text-sm text-slate-600 mt-1"><b>Note:</b> {kit.notes}</p>}
-            </div>
-            <ErrorBox text={error} />
-            {kit.status === 'PREPARING' && <p className="mb-3 text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-700">The store is still preparing this kit — it can be signed once it is marked ready.{kit.sent_back_reason ? <> Sent back: <b className="text-rose-700">{kit.sent_back_reason}</b></> : ''}</p>}
-            {kit.status === 'CANCELLED' && <p className="mb-3 text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-600">Cancelled: {kit.cancelled_reason}</p>}
-            {kit.status === 'READY' && k.kind === 'SAMPLE' && <p className="mb-3 text-sm text-slate-600">A sample's kit — the trim store hands it over to sampling.</p>}
-            {kit.status === 'READY' && !perm.sign && k.kind !== 'SAMPLE' && <p className="mb-3 text-sm text-slate-600">Waiting for a line loader to sign for it.</p>}
-            {kit.status === 'SIGNED' && (() => { const h = k.handovers.find(x => x.id === kit.handover_id); return h ? (
-                <p className="mb-3 text-sm bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-2 text-indigo-900">Signed by <b>{h.signed_by_name || '—'}</b> for <b>{h.production_line_name}</b> · {h.issue_id ? <Link to={`/v3/trim-orders/slips/${h.issue_id}`} className="font-bold underline">{h.issue_no}</Link> : 'garment labels only'}{kit.bill_no ? ` · valuation bill ${kit.bill_no}` : ''}{returns.length ? <> · <b className="text-rose-700">{returns.length} line(s) rejected — back to the store</b></> : ''}</p>) : null; })()}
-
-            {canSign && (
-                <div className="flex flex-wrap items-end gap-3 mb-3">
-                    <div className="min-w-[240px] flex-1 max-w-md">
-                        <Field label="Goes to (line)">
-                            <select className={`${inputCls} text-base py-2.5`} value={lineId} onChange={e => setLineId(e.target.value)}>
-                                <option value="">— pick the line —</option>
-                                {(() => { const mine = new Set((k.batch_lines || []).map(l => l.id)); return [...lines.filter(l => mine.has(l.id)), ...lines.filter(l => !mine.has(l.id))]; })()
-                                    .map(l => <option key={`${l.id}-${l.stage || ''}`} value={l.id}>{l.name}{l.stage ? ` (${l.stage})` : ''}{(k.batch_lines || []).some(b => b.id === l.id) ? ' — batch is here' : ''}</option>)}
-                            </select>
-                        </Field>
+            {/* The kit's banner (27 Nov 2026, owner: "complete data in below banner is messed up" → labelled fields, like 2.0's
+                floor screens): each fact under its own small label; the line the kit goes to is the banner's own drop-down. */}
+            {(() => {
+                const h = kit.status === 'SIGNED' ? k.handovers.find(x => x.id === kit.handover_id) : null;
+                const lineBatch = k.batch_code && k.order_no && k.batch_code.startsWith(`${k.order_no}-`) ? k.batch_code.slice(k.order_no.length + 1).replace('-', ' · ') : k.batch_code;
+                const checked = keys.filter(x => mark(x)).length;
+                const F = ({ label, children, wide }) => (
+                    <div className={`min-w-0 ${wide ? 'col-span-2 sm:col-span-1' : ''}`}>
+                        <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">{label}</p>
+                        <div className="text-sm text-slate-800 leading-snug">{children}</div>
                     </div>
+                );
+                const when2 = (d, who) => <>{when(d)}{who ? <span className="block text-xs text-slate-500">{who}</span> : null}</>;
+                return (
+                    <div className="bg-white border-2 border-slate-800 rounded-xl mb-3 overflow-hidden">
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 pt-3 pb-2 border-b border-slate-100">
+                            <h1 className="text-3xl font-black tracking-tight text-slate-900">{kit.kit_no}</h1>
+                            <span className={`text-xs font-black px-2 py-0.5 rounded border ${st.cls}`}>{st.label}</span>
+                            {canSign && <span className={`ml-auto text-sm font-bold ${checked === keys.length ? 'text-emerald-700' : 'text-slate-600'}`}>{checked} of {keys.length} checked</span>}
+                        </div>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-5 gap-y-3 px-4 py-3">
+                            <F label="Order"><b>{k.order_no}</b><span className="block text-xs text-slate-500">{k.customer_name}</span></F>
+                            <F label="Batch">{k.floor_no ? <b className="text-base">#{k.floor_no}</b> : '—'}{lineBatch && <span className="block text-xs text-slate-500">{lineBatch}</span>}</F>
+                            <F label="Stages">{kit.stages?.length ? kit.stages.join(' · ') : <span className="text-slate-400">no stage</span>}</F>
+                            <F label="Goes to">{canSign ? (
+                                <select className="w-full px-2 py-1.5 text-sm font-bold border border-slate-300 rounded-lg bg-white focus:outline-none focus:border-indigo-500" value={lineId} onChange={e => setLineId(e.target.value)} aria-label="Goes to (line)">
+                                    <option value="">— pick the line —</option>
+                                    {(() => { const mine = new Set((k.batch_lines || []).map(l => l.id)); return [...lines.filter(l => mine.has(l.id)), ...lines.filter(l => !mine.has(l.id))]; })()
+                                        .map(l => <option key={`${l.id}-${l.stage || ''}`} value={l.id}>{l.name}{l.stage ? ` (${l.stage})` : ''}{(k.batch_lines || []).some(b => b.id === l.id) ? ' — batch is here' : ''}</option>)}
+                                </select>) : <b>{h?.production_line_name || kit.goes_to || <span className="font-normal text-slate-400">any line</span>}</b>}
+                                {canSign && lineId && (k.batch_lines || []).some(b => b.id === lineId) && <span className="block text-xs text-emerald-700">batch is here</span>}
+                                {canSign && !lineId && <span className="block text-xs font-bold text-amber-700">pick the line</span>}</F>
+                            <F label="Items">{groups.length}{kit.labels_qty ? <span className="block text-xs text-slate-500">+ {kit.labels_qty} garment labels</span> : <span className="block text-xs text-slate-500">no garment labels</span>}</F>
+                            {kit.status === 'SIGNED' ? (
+                                <F label="Signed">{when2(kit.signed_at, h ? `${h.signed_by_name || '—'}${h.production_line_name ? ` · ${h.production_line_name}` : ''}` : null)}</F>
+                            ) : kit.status === 'READY' ? (
+                                <F label="Ready">{when2(kit.ready_at, kit.ready_by_name)}</F>
+                            ) : kit.status === 'CANCELLED' ? (
+                                <F label="Cancelled">{when2(kit.cancelled_at, kit.cancelled_by_name)}</F>
+                            ) : (
+                                <F label="Made">{when2(kit.created_at, kit.created_by_name)}</F>
+                            )}
+                            {kit.status === 'SIGNED' && h && <F label="Slip · bill">{h.issue_id ? <Link to={`/v3/trim-orders/slips/${h.issue_id}`} className="font-bold text-indigo-700 hover:underline">{h.issue_no}</Link> : 'garment labels only'}{kit.bill_no ? <span className="block text-xs text-slate-500">bill {kit.bill_no}</span> : null}</F>}
+                            <F label="Trim order"><Link to={`/v3/trim-orders/${k.id}`} className="font-semibold text-indigo-700 hover:underline">{k.trim_order_no} ›</Link></F>
+                        </div>
+                        {kit.notes && <p className="px-4 pb-3 -mt-1 text-sm text-slate-600"><span className="text-[10px] font-black uppercase tracking-wider text-slate-400 mr-2">Note</span>{kit.notes}</p>}
+                        {kit.status === 'PREPARING' && <p className="px-4 py-2 text-sm bg-slate-50 border-t border-slate-200 text-slate-700">The store is still preparing this kit — it can be signed once it is marked ready.</p>}
+                        {kit.status === 'PREPARING' && kit.sent_back_reason && <p className="px-4 py-2 text-sm bg-rose-50 border-t border-rose-200 text-rose-900"><b>Sent back:</b> {kit.sent_back_reason}</p>}
+                        {kit.status === 'CANCELLED' && <p className="px-4 py-2 text-sm bg-slate-50 border-t border-slate-200 text-slate-600"><b>Cancelled:</b> {kit.cancelled_reason}</p>}
+                        {kit.status === 'READY' && k.kind === 'SAMPLE' && <p className="px-4 py-2 text-sm bg-slate-50 border-t border-slate-200 text-slate-600">A sample's kit — the trim store hands it over to sampling.</p>}
+                        {kit.status === 'READY' && !perm.sign && k.kind !== 'SAMPLE' && <p className="px-4 py-2 text-sm bg-slate-50 border-t border-slate-200 text-slate-600">Waiting for a line loader to sign for it.</p>}
+                        {kit.status === 'SIGNED' && returns.length > 0 && <p className="px-4 py-2 text-sm bg-rose-50 border-t border-rose-200 text-rose-900"><b>{returns.length} line(s) rejected</b> — back to the store (below).</p>}
+                    </div>
+                );
+            })()}
+            <ErrorBox text={error} />
+
+            {/* one toolbar: the actions on the left, the search and trim type on the right */}
+            <div className="flex flex-wrap items-center gap-2 mb-2">
+                {canSign && <>
                     <SecondaryButton onClick={allOk}><Check size={14} /> All received</SecondaryButton>
                     <SecondaryButton onClick={() => setMarks({})}>Clear</SecondaryButton>
                     <SecondaryButton onClick={() => { setFormError(''); setSendBack({ reason: '' }); }}><RotateCcw size={14} /> Send whole kit back</SecondaryButton>
-                    <SecondaryButton onClick={async () => exportPickList(k, await loadLetterhead(), kit)}><FileDown size={14} /> Pick list</SecondaryButton>
-                </div>
-            )}
-            {canSign && <p className="mb-3 text-sm text-slate-600">Tap each item as you find it in the bag. Something wrong — <b>Reject</b> it (all of it or part): what you don't take goes back to the store.</p>}
-
-            <ItemFilter q={fq} setQ={setFq} type={ftype} setType={setFtype} types={itemTypes} shown={groups.filter(match).length} total={groups.length} big />
+                </>}
+                {['PREPARING', 'READY'].includes(kit.status) && <SecondaryButton onClick={async () => exportPickList(k, await loadLetterhead(), kit)}><FileDown size={14} /> Pick list</SecondaryButton>}
+                <div className="xl:ml-auto [&>div]:mb-0"><ItemFilter q={fq} setQ={setFq} type={ftype} setType={setFtype} types={itemTypes} shown={groups.filter(match).length} total={groups.length} big /></div>
+            </div>
+            {canSign && <p className="mb-3 text-sm text-slate-500">Tap each item you find in the bag. Wrong, damaged or missing → <b>Reject</b> (all or part) — it goes back to the store.</p>}
             {filtering && canSign && <p className="-mt-1 mb-3 text-sm text-amber-800">Filtered — the other items are hidden, not skipped: every item still needs a tick or a reject before Confirm.</p>}
             <div className="space-y-4">
                 {filtering && !sections.length && <p className="text-sm text-slate-500 bg-white border border-slate-200 rounded-xl p-6 text-center">No item in this kit matches.</p>}

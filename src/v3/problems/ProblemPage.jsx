@@ -12,6 +12,9 @@ import { API_BASE_URL } from '../../utils/api';
 import { Field, inputCls, PrimaryButton, SecondaryButton, ErrorBox, Loading } from '../components/ui';
 import { StatusChip, IMPACT } from './ProblemsPage';
 import { FileThumbs, useImages } from './ReportProblem';
+import { helpdeskApi } from '../api/helpdeskApi';
+import HelpdeskAnswer from './HelpdeskAnswer';
+import { Bot } from 'lucide-react';
 
 const when = (v) => (v ? new Date(v).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '');
 const Images = ({ files }) => (files?.length ? (
@@ -37,6 +40,13 @@ export default function ProblemPage() {
     const [formError, setFormError] = useState('');
     const load = useCallback(() => problemsApi.get(id).then(r => setP(r.data)).catch(err => setError(apiError(err, 'Failed to load.'))), [id]);
     useEffect(() => { load(); }, [load]);
+    // the AI helpdesk on this report (27 Nov 2026, migration 93)
+    const [hdRuns, setHdRuns] = useState([]);
+    const [hd, setHd] = useState(null);
+    const [hdError, setHdError] = useState('');
+    const loadHd = useCallback(() => { helpdeskApi.forReport(id).then(r => setHdRuns(r.data)).catch(() => setHdRuns([])); }, [id]);
+    useEffect(() => { loadHd(); helpdeskApi.status().then(r => setHd(r.data)).catch(() => setHd(null)); }, [loadHd]);
+    const askHd = async () => { setHdError(''); try { const r = await helpdeskApi.ask(id); setHdRuns(list => [...list, r.data]); } catch (err) { setHdError(apiError(err, 'Failed.')); } };
     useEffect(() => { if (p?.can?.triage && !admins.length) problemsApi.admins().then(r => setAdmins(r.data)).catch(() => {}); }, [p, admins.length]);
     const run = async (fn, after) => { setBusy(true); setError(''); setFormError(''); try { setP((await fn()).data); if (after) after(); } catch (err) { (act ? setFormError : setError)(apiError(err, 'Failed.')); } finally { setBusy(false); } };
     if (!p) return error ? <ErrorBox text={error} /> : <Loading />;
@@ -76,6 +86,13 @@ export default function ProblemPage() {
                         <p className="text-sm whitespace-pre-wrap text-slate-800">{p.description}</p>
                         <Images files={p.files} />
                     </div>
+                    {hdRuns.map(r => <HelpdeskAnswer key={r.id} run={r} mine={p.mine} admin={p.can.triage} onChange={(x) => setHdRuns(list => list.map(y => (y.id === x.id ? x : y)))} />)}
+                    {!idea && hd?.enabled && (p.mine || p.can.triage) && !hdRuns.some(r => r.status === 'RUNNING') && hdRuns.length < 3 && ['NEW', 'IN_PROGRESS', 'NEEDS_INFO'].includes(p.status) && (
+                        <div className="flex items-center gap-2">
+                            <button type="button" onClick={askHd} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-indigo-300 bg-white text-sm font-bold text-indigo-700 hover:bg-indigo-50"><Bot size={15} /> {hdRuns.length ? 'Ask the helpdesk again' : 'Ask the helpdesk'}</button>
+                            {hdError && <span className="text-xs text-rose-700">{hdError}</span>}
+                        </div>
+                    )}
                     {p.messages.map(m => (
                         <div key={m.id} className={`rounded-xl px-4 py-3 border ${m.from_admin ? 'bg-indigo-50/60 border-indigo-200 mr-10' : 'bg-white border-slate-200 ml-10'}`}>
                             <p className="text-xs text-slate-500 mb-1"><b className="text-slate-700">{m.user_name}</b>{m.from_admin ? ' · factory admin' : ''} · {when(m.created_at)}</p>
@@ -127,6 +144,8 @@ export default function ProblemPage() {
                             {ctx.console_errors?.length > 0 && <div><p className="font-bold text-rose-700 mt-1">Browser errors ({ctx.console_errors.length})</p>
                                 {ctx.console_errors.slice().reverse().map((e, i) => <p key={i} className="break-all">{e.message} <span className="text-slate-400">{e.source}</span></p>)}</div>}
                             {!ctx.api_errors?.length && !ctx.console_errors?.length && <p className="text-slate-400">No failed requests or browser errors.</p>}
+                            {ctx.recent_calls?.length > 0 && <div><p className="font-bold text-slate-600 mt-1">Last requests ({ctx.recent_calls.length})</p>
+                                {ctx.recent_calls.slice().reverse().map((e, i) => <p key={i} className="break-all"><b>{e.status}</b> {e.method} {e.url}</p>)}</div>}
                         </div>
                     )}
                     <div className="bg-white border border-slate-200 rounded-xl px-4 py-3 text-xs text-slate-600 space-y-1">

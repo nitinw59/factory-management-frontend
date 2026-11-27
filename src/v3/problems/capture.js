@@ -4,15 +4,23 @@ import api from '../../utils/api';
 
 const MAX = 10;
 const apiErrors = [];
+// The last calls that worked (27 Nov 2026, AI helpdesk phase 1): which record was open, which code was scanned — address
+// and status only, never the data.
+const recentCalls = [];
+const QUIET = /\/(problems|helpdesk|me|my-work|approvals|work\/|notifications|live)/;
 const consoleErrors = [];
 let installed = false;
-const push = (list, item) => { list.push(item); if (list.length > MAX) list.shift(); };
+const push = (list, item, max = MAX) => { list.push(item); if (list.length > max) list.shift(); };
 const now = () => new Date().toISOString();
 
 export function installCapture() {
     if (installed) return;
     installed = true;
-    api.interceptors.response.use((res) => res, (err) => {
+    api.interceptors.response.use((res) => {
+        const cfg = res?.config || {}; const url = String(cfg.url || '');
+        if (!QUIET.test(url)) push(recentCalls, { at: now(), method: String(cfg.method || 'get').toUpperCase(), url: url.slice(0, 200), status: res.status }, 15);
+        return res;
+    }, (err) => {
         const cfg = err?.config || {};
         const url = String(cfg.url || '');
         if (!url.includes('/problems')) {
@@ -36,7 +44,7 @@ export function captureContext() {
         page_heading: heading(),
         app_build: process.env.REACT_APP_VERSION || process.env.REACT_APP_BUILD || 'beta',
         context: {
-            api_errors: [...apiErrors], console_errors: [...consoleErrors],
+            api_errors: [...apiErrors], console_errors: [...consoleErrors], recent_calls: [...recentCalls],
             viewport: `${window.innerWidth}×${window.innerHeight}`, language: navigator.language, time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         },
     };
