@@ -29,7 +29,7 @@ function HelpdeskAdmin({ onClose }) {
     const [error, setError] = useState('');
     const [chg, setChg] = useState(null);   // { current, next, again }
     const [msg, setMsg] = useState('');
-    const show = (d) => { setData(d); setForm({ enabled: d.settings.enabled, per: String(d.settings.daily_cap_per_user), total: String(d.settings.daily_cap_total) }); };
+    const show = (d) => { setData(d); setForm({ enabled: d.settings.enabled, per: String(d.settings.daily_cap_per_user), total: String(d.settings.daily_cap_total), model: d.settings.model }); };
     const act = async (fn) => { setBusy(true); setError(''); setMsg(''); try { await fn(); } catch (err) { if (err?.response?.status === 401 && helpdeskApi.unlocked()) { helpdeskApi.lock(); setData(null); } setError(apiError(err, 'Failed.')); } finally { setBusy(false); } };
     const unlock = () => act(async () => { await helpdeskApi.unlock(pw); setPw(''); show((await helpdeskApi.admin()).data); });
     // still unlocked (within the 30 minutes): straight to the settings
@@ -59,11 +59,16 @@ function HelpdeskAdmin({ onClose }) {
                             <div className="grid sm:grid-cols-3 gap-3">
                                 <Field label="Per person per day"><input className={inputCls} type="number" min="0" value={form.per} onChange={e => setForm({ ...form, per: e.target.value })} /></Field>
                                 <Field label="Everyone per day"><input className={inputCls} type="number" min="0" value={form.total} onChange={e => setForm({ ...form, total: e.target.value })} /></Field>
-                                <Field label="Model"><input className={inputCls} value={data.settings.model} disabled /></Field>
+                                <Field label="Model">
+                                    <select className={inputCls} value={form.model} onChange={e => setForm({ ...form, model: e.target.value })}>
+                                        {(data.models || []).map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+                                    </select>
+                                </Field>
                             </div>
+                            {(() => { const m = (data.models || []).find(x => x.id === form.model); return m ? <p className="-mt-1 text-xs text-slate-600"><b>{m.label}</b>: {m.note}. ${m.input} input / ${m.output} output per million tokens — a typical report ≈ ${((50000 * m.input + 3000 * m.output) / 1e6).toFixed(m.input < 1 ? 3 : 2)}.</p> : null; })()}
                             <p className="text-xs text-slate-500">Read-only: it looks things up as the person who reported (same access, prices hidden the same way) and never changes data. Above the limits a report goes to you as before.</p>
                             <div className="flex flex-wrap gap-2">
-                                <PrimaryButton busy={busy} disabled={busy} onClick={() => act(async () => { show((await helpdeskApi.saveAdmin({ enabled: form.enabled, daily_cap_per_user: Number(form.per), daily_cap_total: Number(form.total) })).data); setMsg('Saved.'); })}>Save</PrimaryButton>
+                                <PrimaryButton busy={busy} disabled={busy} onClick={() => act(async () => { show((await helpdeskApi.saveAdmin({ enabled: form.enabled, daily_cap_per_user: Number(form.per), daily_cap_total: Number(form.total), model: form.model })).data); setMsg('Saved.'); })}>Save</PrimaryButton>
                                 <SecondaryButton onClick={() => setChg({ current: '', next: '', again: '' })}>Change password…</SecondaryButton>
                                 <SecondaryButton onClick={() => { helpdeskApi.lock(); setData(null); }}><Lock size={14} /> Lock</SecondaryButton>
                                 {msg && <span className="self-center text-sm font-bold text-emerald-700">{msg}</span>}
